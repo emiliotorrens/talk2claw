@@ -42,6 +42,10 @@ Response text → Google Cloud TTS → PCM audio → 🔊 Speaker
 
 Open in Android Studio, sync Gradle, run on device.
 
+## Inspiration
+
+Built from scratch, inspired by [VisionClaw](https://github.com/Intent-Lab/VisionClaw) — a real-time AI assistant for Meta Ray-Ban smart glasses using Gemini Live + OpenClaw. We borrowed architectural patterns from its Android app (OpenClawBridge, AudioManager) but replaced the Gemini Live WebSocket pipeline with a simpler STT → OpenClaw → TTS flow where the conversation is fully driven by the OpenClaw agent (Claude), not Gemini.
+
 ## License
 
 MIT
