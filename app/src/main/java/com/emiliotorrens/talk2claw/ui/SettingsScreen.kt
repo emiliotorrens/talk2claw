@@ -71,7 +71,7 @@ fun SettingsScreen(
                 value = host,
                 onValueChange = { host = it },
                 label = { Text("Host") },
-                placeholder = { Text("http://100.126.172.37") },
+                placeholder = { Text("http://your-host.local") },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
             )

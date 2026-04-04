@@ -16,7 +16,7 @@ Response text → Google Cloud TTS → PCM audio → 🔊 Speaker
 
 1. Open the app → Settings (gear icon)
 2. Configure:
-   - **Gateway Host**: Your OpenClaw gateway URL (e.g. `http://100.126.172.37`)
+   - **Gateway Host**: Your OpenClaw gateway URL (e.g. `http://your-host.local` or Tailscale IP)
    - **Gateway Port**: `18789` (default)
    - **Gateway Token**: Your OpenClaw auth token
    - **Google Cloud API Key**: For Text-to-Speech
