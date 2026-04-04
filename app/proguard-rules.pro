@@ -1,0 +1,3 @@
+-keep class com.emiliotorrens.talk2claw.** { *; }
+-dontwarn okhttp3.**
+-dontwarn okio.**
