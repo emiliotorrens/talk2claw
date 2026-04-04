@@ -11,6 +11,5 @@ data class AppSettings(
     val ttsVoice: String = "es-ES-Wavenet-B",  // Male Spanish voice
     val ttsLanguageCode: String = "es-ES",
     val googleCloudApiKey: String = "",
-    val usePushToTalk: Boolean = true,           // vs continuous listening
     val keepScreenOn: Boolean = true,
 )

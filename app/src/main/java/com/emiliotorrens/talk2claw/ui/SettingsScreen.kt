@@ -27,7 +27,6 @@ fun SettingsScreen(
     var gcloudKey by remember { mutableStateOf(settings.googleCloudApiKey) }
     var ttsVoice by remember { mutableStateOf(settings.ttsVoice) }
     var ttsLang by remember { mutableStateOf(settings.ttsLanguageCode) }
-    var pushToTalk by remember { mutableStateOf(settings.usePushToTalk) }
 
     Scaffold(
         topBar = {
@@ -47,7 +46,6 @@ fun SettingsScreen(
                             googleCloudApiKey = gcloudKey.trim(),
                             ttsVoice = ttsVoice.trim(),
                             ttsLanguageCode = ttsLang.trim(),
-                            usePushToTalk = pushToTalk,
                         ))
                         onBack()
                     }) {
@@ -120,16 +118,6 @@ fun SettingsScreen(
                 singleLine = true,
             )
 
-            HorizontalDivider()
-            Text("Input", style = MaterialTheme.typography.titleMedium)
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text("Push to talk (mantener pulsado)")
-                Switch(checked = pushToTalk, onCheckedChange = { pushToTalk = it })
-            }
         }
     }
 }

@@ -29,6 +29,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val _settings = MutableStateFlow(SettingsManager.load())
     val settings: StateFlow<AppSettings> = _settings.asStateFlow()
 
+    private val _conversationActive = MutableStateFlow(false)
+    val conversationActive: StateFlow<Boolean> = _conversationActive.asStateFlow()
+
     private val _pipelineState = MutableStateFlow<PipelineState>(PipelineState.Idle)
     val pipelineState: StateFlow<PipelineState> = _pipelineState.asStateFlow()
 
@@ -45,7 +48,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
         // Wire STT callbacks
         stt.onResult = { text -> onSpeechResult(text) }
-        stt.onError = { err -> _statusMessage.value = "STT: $err" }
+        stt.onError = { err ->
+            Log.w(TAG, "STT error: $err")
+            _statusMessage.value = "STT: $err"
+        }
 
         // Check gateway on start
         viewModelScope.launch {
@@ -61,38 +67,53 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { bridge.checkConnection() }
     }
 
-    /** Start the voice pipeline — user presses the talk button */
-    fun startListening() {
-        if (_pipelineState.value != PipelineState.Idle) return
-        tts.stop() // Stop any ongoing playback
+    // ── Conversation lifecycle ──────────────────────────────────
+
+    /** Toggle conversation on/off */
+    fun toggleConversation() {
+        if (_conversationActive.value) {
+            stopConversation()
+        } else {
+            startConversation()
+        }
+    }
+
+    /** Start continuous conversation mode */
+    private fun startConversation() {
+        Log.d(TAG, "Starting conversation")
+        _conversationActive.value = true
+        _statusMessage.value = ""
+        stt.continuousMode = true
         _pipelineState.value = PipelineState.Listening
         stt.startListening(_settings.value.ttsLanguageCode)
     }
 
-    /** Stop listening — user releases the talk button */
-    fun stopListening() {
-        stt.stopListening()
-        _pipelineState.value = PipelineState.ProcessingSTT
-    }
-
-    /** Cancel current interaction */
-    fun cancel() {
+    /** Stop conversation mode entirely */
+    fun stopConversation() {
+        Log.d(TAG, "Stopping conversation")
+        _conversationActive.value = false
         stt.cancel()
         tts.stop()
         _pipelineState.value = PipelineState.Idle
     }
 
+    // ── Pipeline: STT result → Claw → TTS → resume listening ──
+
     /** Called when STT produces a final result */
     private fun onSpeechResult(text: String) {
+        if (!_conversationActive.value) return
+
         Log.d(TAG, "User said: $text")
         addTranscript(TranscriptEntry.User(text))
-        _pipelineState.value = PipelineState.SendingToClaw
+        _pipelineState.value = PipelineState.Thinking
 
         viewModelScope.launch {
             // Send to OpenClaw
             val result = bridge.sendMessage(text)
             result.fold(
                 onSuccess = { response ->
+                    if (!_conversationActive.value) return@fold
+
                     Log.d(TAG, "Claw: ${response.take(100)}")
                     addTranscript(TranscriptEntry.Claw(response))
                     _pipelineState.value = PipelineState.Speaking
@@ -100,12 +121,20 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     // Speak the response
                     tts.speak(response).fold(
                         onSuccess = {
-                            _pipelineState.value = PipelineState.Idle
+                            // Resume listening after TTS finishes
+                            if (_conversationActive.value) {
+                                _pipelineState.value = PipelineState.Listening
+                                stt.resumeListening()
+                            }
                         },
                         onFailure = { err ->
                             Log.w(TAG, "TTS failed: ${err.message}")
                             _statusMessage.value = "TTS: ${err.message}"
-                            _pipelineState.value = PipelineState.Idle
+                            // Still resume listening even if TTS fails
+                            if (_conversationActive.value) {
+                                _pipelineState.value = PipelineState.Listening
+                                stt.resumeListening()
+                            }
                         }
                     )
                 },
@@ -113,11 +142,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     Log.e(TAG, "Claw error: ${err.message}")
                     addTranscript(TranscriptEntry.Error("Error: ${err.message}"))
                     _statusMessage.value = "Error: ${err.message}"
-                    _pipelineState.value = PipelineState.Idle
+                    // Resume listening on error too
+                    if (_conversationActive.value) {
+                        _pipelineState.value = PipelineState.Listening
+                        stt.resumeListening()
+                    }
                 }
             )
         }
     }
+
+    // ── Transcript ──────────────────────────────────────────────
 
     private fun addTranscript(entry: TranscriptEntry) {
         _transcript.value = _transcript.value + entry
@@ -127,6 +162,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _transcript.value = emptyList()
         bridge.resetConversation()
     }
+
+    // ── Connection ──────────────────────────────────────────────
 
     val connectionState get() = bridge.connectionState
 
@@ -140,24 +177,20 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         super.onCleared()
     }
 
-    // --- Types ---
+    // ── Types ───────────────────────────────────────────────────
 
     sealed class PipelineState {
         data object Idle : PipelineState()
         data object Listening : PipelineState()
-        data object ProcessingSTT : PipelineState()
-        data object SendingToClaw : PipelineState()
+        data object Thinking : PipelineState()
         data object Speaking : PipelineState()
 
         val displayText: String get() = when (this) {
-            Idle -> "Toca para hablar"
+            Idle -> "Toca para iniciar conversación"
             Listening -> "Escuchando..."
-            ProcessingSTT -> "Procesando voz..."
-            SendingToClaw -> "Pensando..."
+            Thinking -> "Pensando..."
             Speaking -> "Hablando..."
         }
-
-        val isActive: Boolean get() = this != Idle
     }
 
     sealed class TranscriptEntry {

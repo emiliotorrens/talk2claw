@@ -21,7 +21,6 @@ object SettingsManager {
         ttsVoice = prefs.getString("tts_voice", "es-ES-Wavenet-B") ?: "es-ES-Wavenet-B",
         ttsLanguageCode = prefs.getString("tts_lang", "es-ES") ?: "es-ES",
         googleCloudApiKey = prefs.getString("gcloud_api_key", "") ?: "",
-        usePushToTalk = prefs.getBoolean("push_to_talk", true),
         keepScreenOn = prefs.getBoolean("keep_screen_on", true),
     )
 
@@ -33,7 +32,6 @@ object SettingsManager {
             .putString("tts_voice", s.ttsVoice)
             .putString("tts_lang", s.ttsLanguageCode)
             .putString("gcloud_api_key", s.googleCloudApiKey)
-            .putBoolean("push_to_talk", s.usePushToTalk)
             .putBoolean("keep_screen_on", s.keepScreenOn)
             .apply()
     }

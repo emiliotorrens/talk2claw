@@ -3,7 +3,7 @@ package com.emiliotorrens.talk2claw.ui
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -12,8 +12,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -21,9 +21,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontStyle
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.emiliotorrens.talk2claw.openclaw.OpenClawBridge
@@ -36,6 +34,7 @@ fun MainScreen(
     onNavigateSettings: () -> Unit,
 ) {
     val pipelineState by viewModel.pipelineState.collectAsState()
+    val conversationActive by viewModel.conversationActive.collectAsState()
     val transcript by viewModel.transcript.collectAsState()
     val partialText by viewModel.stt.partialText.collectAsState()
     val connectionState by viewModel.connectionState.collectAsState()
@@ -68,9 +67,7 @@ fun MainScreen(
                     )
                     Spacer(modifier = Modifier.width(8.dp))
 
-                    IconButton(onClick = {
-                        viewModel.clearTranscript()
-                    }) {
+                    IconButton(onClick = { viewModel.clearTranscript() }) {
                         Icon(Icons.Default.DeleteSweep, "Clear")
                     }
                     IconButton(onClick = onNavigateSettings) {
@@ -99,7 +96,7 @@ fun MainScreen(
                     TranscriptBubble(entry)
                 }
 
-                // Show partial STT text
+                // Show partial STT text while listening
                 if (partialText.isNotBlank() && pipelineState == PipelineState.Listening) {
                     item {
                         Text(
@@ -131,12 +128,11 @@ fun MainScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Big talk button
-            TalkButton(
+            // Conversation toggle button
+            ConversationButton(
+                isActive = conversationActive,
                 pipelineState = pipelineState,
-                onPress = { viewModel.startListening() },
-                onRelease = { viewModel.stopListening() },
-                onCancel = { viewModel.cancel() },
+                onClick = { viewModel.toggleConversation() },
             )
 
             Spacer(modifier = Modifier.height(24.dp))
@@ -145,62 +141,67 @@ fun MainScreen(
 }
 
 @Composable
-fun TalkButton(
+fun ConversationButton(
+    isActive: Boolean,
     pipelineState: PipelineState,
-    onPress: () -> Unit,
-    onRelease: () -> Unit,
-    onCancel: () -> Unit,
+    onClick: () -> Unit,
 ) {
     val isListening = pipelineState == PipelineState.Listening
-    val isProcessing = pipelineState == PipelineState.SendingToClaw || pipelineState == PipelineState.ProcessingSTT
+    val isThinking = pipelineState == PipelineState.Thinking
     val isSpeaking = pipelineState == PipelineState.Speaking
-    val isIdle = pipelineState == PipelineState.Idle
 
     // Animate button color
     val bgColor by animateColorAsState(
         targetValue = when {
-            isListening -> Color(0xFFF44336)   // Red while listening
-            isProcessing -> Color(0xFFFF9800)   // Orange while processing
-            isSpeaking -> Color(0xFF4CAF50)     // Green while speaking
-            else -> Color(0xFF2196F3)            // Blue idle
+            !isActive -> Color(0xFF2196F3)       // Blue — idle, tap to start
+            isListening -> Color(0xFFF44336)      // Red — listening
+            isThinking -> Color(0xFFFF9800)       // Orange — processing
+            isSpeaking -> Color(0xFF4CAF50)       // Green — speaking
+            else -> Color(0xFFF44336)
         },
         label = "buttonColor"
     )
 
     // Pulse animation while listening
-    val pulseScale by rememberInfiniteTransition(label = "pulse").animateFloat(
+    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+    val pulseScale by infiniteTransition.animateFloat(
         initialValue = 1f,
-        targetValue = if (isListening) 1.1f else 1f,
+        targetValue = if (isListening) 1.08f else 1f,
         animationSpec = infiniteRepeatable(
-            animation = tween(600, easing = EaseInOutSine),
+            animation = tween(800, easing = EaseInOutSine),
             repeatMode = RepeatMode.Reverse
         ),
         label = "pulseScale"
     )
 
+    // Outer glow ring when active
+    if (isActive) {
+        Box(
+            modifier = Modifier
+                .size(140.dp)
+                .scale(pulseScale)
+                .background(bgColor.copy(alpha = 0.2f), CircleShape),
+            contentAlignment = Alignment.Center
+        ) {
+            ConversationButtonInner(bgColor, isActive, onClick)
+        }
+    } else {
+        ConversationButtonInner(bgColor, isActive, onClick)
+    }
+}
+
+@Composable
+private fun ConversationButtonInner(bgColor: Color, isActive: Boolean, onClick: () -> Unit) {
     Box(
         modifier = Modifier
             .size(120.dp)
-            .scale(pulseScale)
             .background(bgColor, CircleShape)
-            .pointerInput(isIdle, isListening, isSpeaking) {
-                detectTapGestures(
-                    onPress = {
-                        if (isIdle) {
-                            onPress()
-                            tryAwaitRelease()
-                            onRelease()
-                        } else if (isSpeaking) {
-                            onCancel()
-                        }
-                    }
-                )
-            },
+            .clickable { onClick() },
         contentAlignment = Alignment.Center
     ) {
         Icon(
-            imageVector = if (isListening) Icons.Default.Stop else Icons.Default.Mic,
-            contentDescription = if (isListening) "Stop" else "Talk",
+            imageVector = if (isActive) Icons.Default.MicOff else Icons.Default.Mic,
+            contentDescription = if (isActive) "Stop conversation" else "Start conversation",
             tint = Color.White,
             modifier = Modifier.size(48.dp)
         )
