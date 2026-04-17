@@ -80,7 +80,7 @@ class GatewayService : Service() {
         if (!settings.wakeWordEnabled || settings.picovoiceAccessKey.isBlank()) return
 
         try {
-            val engine = WakeWordEngine(settings.picovoiceAccessKey)
+            val engine = WakeWordEngine(this, settings.picovoiceAccessKey)
             engine.onWakeWordDetected = {
                 Log.i(TAG, "Wake word detected — notifying app")
                 (application as Talk2ClawApp).onWakeWordDetected()

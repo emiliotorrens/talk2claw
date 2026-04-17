@@ -1,5 +1,6 @@
 package com.emiliotorrens.talk2claw.voice
 
+import android.content.Context
 import android.util.Log
 import ai.picovoice.porcupine.PorcupineManager
 import ai.picovoice.porcupine.PorcupineManagerCallback
@@ -20,6 +21,7 @@ import ai.picovoice.porcupine.Porcupine
  *       and place in assets/ for better Spanish wake word accuracy.
  */
 class WakeWordEngine(
+    private val context: Context,
     private val accessKey: String,
 ) {
     companion object {
@@ -61,7 +63,7 @@ class WakeWordEngine(
                 .setAccessKey(accessKey)
                 .setKeyword(Porcupine.BuiltInKeyword.PORCUPINE)
                 .setSensitivity(0.7f)
-                .build(callback)
+                .build(context, callback)
 
             porcupineManager?.start()
             isListening = true
