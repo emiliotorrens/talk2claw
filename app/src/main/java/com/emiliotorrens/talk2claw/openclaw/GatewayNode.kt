@@ -224,6 +224,29 @@ class GatewayNode(private var settings: AppSettings, private var deviceIdentity:
         }
     }
 
+    /**
+     * Send a command message (e.g. "/model flash") silently — fire-and-forget.
+     * The RPC ACK is awaited so we know the gateway received it, but the chat run
+     * response is NOT tracked (no pendingChatRuns entry), so it never appears in
+     * the UI transcript.
+     * Returns true if the command was sent and acknowledged.
+     */
+    suspend fun sendSilentCommand(command: String): Boolean {
+        if (!isConnected) return false
+        return try {
+            rpc("chat.send", JSONObject().apply {
+                put("message", command)
+                put("sessionKey", "main")
+                put("idempotencyKey", UUID.randomUUID().toString())
+            })
+            Log.d(TAG, "Silent command sent: $command")
+            true
+        } catch (e: Exception) {
+            Log.w(TAG, "Silent command failed: $command — ${e.message}")
+            false
+        }
+    }
+
     /** Get recent conversation history. Returns list of (role, content) pairs. */
     suspend fun getChatHistory(): Result<List<Pair<String, String>>> {
         if (!isConnected) return Result.failure(Exception("Not connected"))

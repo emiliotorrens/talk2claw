@@ -55,6 +55,8 @@ class TextToSpeech(private val settings: AppSettings) {
             s = s.replace(Regex("```[\\s\\S]*?```"), " ")
             // Inline code (`...`)
             s = s.replace(Regex("`([^`]+)`"), "$1")
+            // Bullet points (- or * at start of line) — BEFORE italic to avoid false matches
+            s = s.replace(Regex("""^[\-*+]\s+""", RegexOption.MULTILINE), "")
             // Bold+italic (***text*** or ___text___)
             s = s.replace(Regex("""\*{3}(.+?)\*{3}"""), "$1")
             s = s.replace(Regex("""_{3}(.+?)_{3}"""), "$1")
@@ -70,8 +72,6 @@ class TextToSpeech(private val settings: AppSettings) {
             s = s.replace(Regex("""\[([^\]]+)\]\([^)]+\)"""), "$1")
             // Images ![alt](url) → remove
             s = s.replace(Regex("""!\[[^\]]*\]\([^)]+\)"""), "")
-            // Bullet points (- or * at start of line)
-            s = s.replace(Regex("""^[\-*+]\s+""", RegexOption.MULTILINE), "")
             // Numbered lists (1. 2. etc)
             s = s.replace(Regex("""^\d+\.\s+""", RegexOption.MULTILINE), "")
             // Horizontal rules (--- or ***)
@@ -80,6 +80,9 @@ class TextToSpeech(private val settings: AppSettings) {
             s = s.replace(Regex("""^>\s?""", RegexOption.MULTILINE), "")
             // Strikethrough (~~text~~)
             s = s.replace(Regex("""~~(.+?)~~"""), "$1")
+            // Final cleanup: any remaining lone asterisks or underscores used as formatting
+            s = s.replace(Regex("""(?<=\s)\*(?=\S)"""), "")  // * at word start
+            s = s.replace(Regex("""(?<=\S)\*(?=\s|$)"""), "")  // * at word end
             // Clean up extra whitespace
             s = s.replace(Regex("""\n{3,}"""), "\n\n")
             s = s.trim()

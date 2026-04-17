@@ -12,6 +12,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -34,6 +35,8 @@ fun SettingsScreen(
     onReconnect: () -> Unit,
     onBack: () -> Unit,
     onPreviewVoice: (VoicePreset) -> Unit = {},
+    onModelChanged: ((String) -> Unit)? = null,
+    onThinkingChanged: ((Boolean) -> Unit)? = null,
 ) {
     var host by remember { mutableStateOf(settings.gatewayHost) }
     var port by remember { mutableStateOf(settings.gatewayPort.toString()) }
@@ -46,7 +49,15 @@ fun SettingsScreen(
     }
     var speakingRate by remember { mutableStateOf(settings.speakingRate) }
 
+    // Model & thinking state
+    var modelAlias by remember { mutableStateOf(settings.modelAlias) }
+    var thinkingEnabled by remember { mutableStateOf(settings.thinkingEnabled) }
+
+    val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = { Text("Ajustes") },
@@ -65,6 +76,8 @@ fun SettingsScreen(
                             ttsVoice = selectedPreset.voiceName,
                             ttsLanguageCode = selectedPreset.languageCode,
                             speakingRate = speakingRate,
+                            modelAlias = modelAlias,
+                            thinkingEnabled = thinkingEnabled,
                         ))
                         onBack()
                     }) {
@@ -163,6 +176,66 @@ fun SettingsScreen(
                 rate = speakingRate,
                 onRateChanged = { speakingRate = it },
             )
+
+            HorizontalDivider()
+
+            // ── Modelo ────────────────────────────────────────
+            Text("Modelo", style = MaterialTheme.typography.titleMedium)
+
+            ModelSelector(
+                selectedAlias = modelAlias,
+                onAliasSelected = { alias ->
+                    modelAlias = alias
+                    onModelChanged?.invoke(alias)
+                    scope.launch {
+                        snackbarHostState.currentSnackbarData?.dismiss()
+                        val label = when (alias) {
+                            "flash" -> "Flash (rápido)"
+                            "sonnet" -> "Sonnet (equilibrado)"
+                            "opus" -> "Opus (potente)"
+                            else -> alias
+                        }
+                        snackbarHostState.showSnackbar(
+                            "Modelo: $label",
+                            duration = SnackbarDuration.Short
+                        )
+                    }
+                },
+            )
+
+            HorizontalDivider()
+
+            // ── Thinking mode ─────────────────────────────────
+            Text("IA", style = MaterialTheme.typography.titleMedium)
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Modo Thinking", style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        "El modelo razona antes de responder (más lento, más preciso)",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                    )
+                }
+                Switch(
+                    checked = thinkingEnabled,
+                    onCheckedChange = { enabled ->
+                        thinkingEnabled = enabled
+                        onThinkingChanged?.invoke(enabled)
+                        scope.launch {
+                            snackbarHostState.currentSnackbarData?.dismiss()
+                            snackbarHostState.showSnackbar(
+                                if (enabled) "Thinking: activado" else "Thinking: desactivado",
+                                duration = SnackbarDuration.Short
+                            )
+                        }
+                    },
+                )
+            }
         }
     }
 }
@@ -387,6 +460,75 @@ private fun ConnectionStatusCard(
                 TextButton(onClick = onReconnect) {
                     Text("Reconectar")
                 }
+            }
+        }
+    }
+}
+
+// ── Model selector ──────────────────────────────────────────────────
+
+private data class ModelOption(
+    val alias: String,
+    val label: String,
+    val description: String,
+)
+
+private val MODEL_OPTIONS = listOf(
+    ModelOption("flash",  "Flash",  "Rápido — ideal para conversación de voz"),
+    ModelOption("sonnet", "Sonnet", "Equilibrado — buena calidad y velocidad"),
+    ModelOption("opus",   "Opus",   "Potente — mejor razonamiento, más lento"),
+)
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ModelSelector(
+    selectedAlias: String,
+    onAliasSelected: (String) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val selected = MODEL_OPTIONS.find { it.alias == selectedAlias } ?: MODEL_OPTIONS[1]
+
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { expanded = it },
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        OutlinedTextField(
+            value = selected.label,
+            onValueChange = {},
+            readOnly = true,
+            label = { Text("Modelo") },
+            supportingText = { Text(selected.description, style = MaterialTheme.typography.labelSmall) },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            modifier = Modifier
+                .menuAnchor(MenuAnchorType.PrimaryNotEditable)
+                .fillMaxWidth(),
+            singleLine = true,
+            colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors(),
+        )
+
+        ExposedDropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+        ) {
+            MODEL_OPTIONS.forEach { option ->
+                DropdownMenuItem(
+                    text = {
+                        Column {
+                            Text(option.label, style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                option.description,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                            )
+                        }
+                    },
+                    onClick = {
+                        onAliasSelected(option.alias)
+                        expanded = false
+                    },
+                    contentPadding = ExposedDropdownMenuDefaults.ItemContentPadding,
+                )
             }
         }
     }

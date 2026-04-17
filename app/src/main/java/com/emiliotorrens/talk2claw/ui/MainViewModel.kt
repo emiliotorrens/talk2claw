@@ -89,6 +89,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val _statusMessage = MutableStateFlow("")
     val statusMessage: StateFlow<String> = _statusMessage.asStateFlow()
 
+    /** One-shot snackbar messages (null = nothing pending). */
+    private val _snackbarMessage = MutableStateFlow<String?>(null)
+    val snackbarMessage: StateFlow<String?> = _snackbarMessage.asStateFlow()
+
     /**
      * Set to true when the user interrupts TTS playback.
      * Prevents the original TTS-completion callback from restarting the pipeline
@@ -119,6 +123,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 bridge.checkConnection()
             }
         }
+
+        // Send model + reasoning commands whenever WebSocket connects (or reconnects)
+        viewModelScope.launch {
+            var wasConnected = false
+            gatewayNode.connectionState.collect { state ->
+                val nowConnected = state is GatewayNode.ConnectionState.Connected
+                if (nowConnected && !wasConnected) {
+                    applyModelAndReasoning()
+                }
+                wasConnected = nowConnected
+            }
+        }
     }
 
     /**
@@ -143,6 +159,51 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         bridge = OpenClawBridge(newSettings)
         // Apply settings to WebSocket node (will reconnect)
         getApplication<Talk2ClawApp>().applyNewSettings(newSettings)
+    }
+
+    /** Send /model <alias> silently if connected. Shows a snackbar on success. */
+    fun sendModelCommand(alias: String) {
+        viewModelScope.launch {
+            if (gatewayNode.isConnected) {
+                val ok = gatewayNode.sendSilentCommand("/model $alias")
+                if (ok) {
+                    val label = when (alias) {
+                        "flash" -> "Flash (rápido)"
+                        "sonnet" -> "Sonnet (equilibrado)"
+                        "opus" -> "Opus (potente)"
+                        else -> alias
+                    }
+                    _snackbarMessage.value = "Modelo: $label"
+                }
+            }
+        }
+    }
+
+    /** Send /reasoning on|off silently if connected. Shows a snackbar on success. */
+    fun sendThinkingCommand(enabled: Boolean) {
+        viewModelScope.launch {
+            if (gatewayNode.isConnected) {
+                val cmd = if (enabled) "/reasoning on" else "/reasoning off"
+                val ok = gatewayNode.sendSilentCommand(cmd)
+                if (ok) {
+                    _snackbarMessage.value = if (enabled) "Thinking: activado" else "Thinking: desactivado"
+                }
+            }
+        }
+    }
+
+    /** Consume a snackbar message (called after it is shown). */
+    fun consumeSnackbar() {
+        _snackbarMessage.value = null
+    }
+
+    /** Apply current model/reasoning settings after a fresh WebSocket connection. */
+    private fun applyModelAndReasoning() {
+        viewModelScope.launch {
+            val s = _settings.value
+            gatewayNode.sendSilentCommand("/model ${s.modelAlias}")
+            gatewayNode.sendSilentCommand(if (s.thinkingEnabled) "/reasoning on" else "/reasoning off")
+        }
     }
 
     // ── Connection ──────────────────────────────────────────────

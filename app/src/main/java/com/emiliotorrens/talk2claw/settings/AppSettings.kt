@@ -15,4 +15,8 @@ data class AppSettings(
     val googleCloudApiKey: String = "",
     val keepScreenOn: Boolean = true,
     val speakingRate: Float = 1.0f,
+    /** Model alias to use: "flash", "sonnet" (default), or "opus". */
+    val modelAlias: String = "sonnet",
+    /** Whether thinking/reasoning mode is enabled. */
+    val thinkingEnabled: Boolean = false,
 )

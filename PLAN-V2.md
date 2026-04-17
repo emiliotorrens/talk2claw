@@ -90,12 +90,23 @@ No esperar a tener todo el audio para empezar a reproducir.
 - [ ] `speakingRate` ajustable (slider 0.8 – 1.3)
 - [ ] Guardar preferencia de voz
 
-### Fase 5 — Polish UX
-- [ ] Animaciones de estado (onda escuchando, pulso pensando, ondas hablando)
-- [ ] Wake word "Oye Claw" (Vosk on-device hotword o similar)
+### Fase 5 — Polish UX ✅
+- [x] Animaciones de estado
+- [x] Chat bubbles, dark/light theme, haptics
+- [ ] Wake word "Oye Claw" (movido a Fase 7)
 - [ ] Widget/tile quick-launch
 - [ ] Historial de conversación persistente (Room DB)
-- [ ] Dark/light theme
+
+### Fase 6 — Model & Thinking Selector (en progreso)
+- [ ] Dropdown de modelo: Flash / Sonnet / Opus
+- [ ] Toggle thinking on/off
+- [ ] Se aplica vía /model y /reasoning como chat commands
+
+### Fase 7 — Voice Match On-Device (pendiente)
+- [ ] Speaker verification con modelo on-device (SpeechBrain/Resemblyzer)
+- [ ] Enrollment de 3-5 frases desde Settings
+- [ ] Cosine similarity threshold
+- [ ] Combinar con wake word "Oye Claw"
 
 ---
 

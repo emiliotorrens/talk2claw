@@ -64,6 +64,8 @@ class MainActivity : ComponentActivity() {
                             onReconnect = { viewModel.reconnect() },
                             onBack = { showSettings = false },
                             onPreviewVoice = { viewModel.previewVoice(it) },
+                            onModelChanged = { viewModel.sendModelCommand(it) },
+                            onThinkingChanged = { viewModel.sendThinkingCommand(it) },
                         )
                     } else {
                         MainScreen(

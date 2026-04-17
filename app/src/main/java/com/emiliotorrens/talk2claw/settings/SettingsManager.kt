@@ -24,6 +24,8 @@ object SettingsManager {
         googleCloudApiKey = prefs.getString("gcloud_api_key", "") ?: "",
         keepScreenOn = prefs.getBoolean("keep_screen_on", true),
         speakingRate = prefs.getFloat("speaking_rate", 1.0f),
+        modelAlias = prefs.getString("model_alias", "sonnet") ?: "sonnet",
+        thinkingEnabled = prefs.getBoolean("thinking_enabled", false),
     )
 
     fun save(s: AppSettings) {
@@ -37,6 +39,8 @@ object SettingsManager {
             .putString("gcloud_api_key", s.googleCloudApiKey)
             .putBoolean("keep_screen_on", s.keepScreenOn)
             .putFloat("speaking_rate", s.speakingRate)
+            .putString("model_alias", s.modelAlias)
+            .putBoolean("thinking_enabled", s.thinkingEnabled)
             .apply()
     }
 }
