@@ -119,6 +119,19 @@ No esperar a tener todo el audio para empezar a reproducir.
 
 ---
 
+### Fase 8 — gRPC Streaming TTS (pendiente)
+- [ ] Migrar de REST (`text:synthesize`) a gRPC Streaming (`StreamingSynthesize`)
+- [ ] Dependencia: `google-cloud-texttospeech` gRPC client para Android
+- [ ] Primera sílaba en ~100ms vs ~300ms actual
+- [ ] Requiere cambio de OkHttp REST a gRPC channel
+
+### Fase 9 — Audio Nativo / Gemini Live (evaluación)
+- [ ] Evaluar si OpenClaw puede exponer modo audio-nativo
+- [ ] Gemini Live genera audio directamente (~50ms latencia)
+- [ ] Requiere Gemini como modelo — evaluar compatibilidad con OpenClaw
+
+---
+
 ## Prioridad
 Fase 1 → 2 → 3 → 4 → 5
 

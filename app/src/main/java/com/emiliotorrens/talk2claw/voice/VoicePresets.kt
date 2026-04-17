@@ -13,9 +13,22 @@ data class VoicePreset(
     val gender: String,       // "Masculino", "Femenino"
 )
 
-/** Spanish voice presets ordered by quality (Studio > Neural2 > Wavenet > Standard). */
+/** Spanish voice presets ordered by quality (Chirp3 HD > Studio > Neural2 > Wavenet > Standard). */
 val VOICE_PRESETS: List<VoicePreset> = listOf(
-    // Studio — highest quality, most natural (premium pricing)
+    // Chirp 3 HD — latest generation, most natural and expressive
+    VoicePreset("chirp3-m1", "Chirp3 Enceladus", "es-ES", "es-ES-Chirp3-HD-Enceladus", "Chirp3 HD", "Masculino"),
+    VoicePreset("chirp3-m2", "Chirp3 Fenrir", "es-ES", "es-ES-Chirp3-HD-Fenrir", "Chirp3 HD", "Masculino"),
+    VoicePreset("chirp3-m3", "Chirp3 Charon", "es-ES", "es-ES-Chirp3-HD-Charon", "Chirp3 HD", "Masculino"),
+    VoicePreset("chirp3-m4", "Chirp3 Puck", "es-ES", "es-ES-Chirp3-HD-Puck", "Chirp3 HD", "Masculino"),
+    VoicePreset("chirp3-f1", "Chirp3 Aoede", "es-ES", "es-ES-Chirp3-HD-Aoede", "Chirp3 HD", "Femenino"),
+    VoicePreset("chirp3-f2", "Chirp3 Leda", "es-ES", "es-ES-Chirp3-HD-Leda", "Chirp3 HD", "Femenino"),
+    VoicePreset("chirp3-f3", "Chirp3 Kore", "es-ES", "es-ES-Chirp3-HD-Kore", "Chirp3 HD", "Femenino"),
+    VoicePreset("chirp3-f4", "Chirp3 Zephyr", "es-ES", "es-ES-Chirp3-HD-Zephyr", "Chirp3 HD", "Femenino"),
+    // Chirp HD — previous generation HD voices
+    VoicePreset("chirp-m", "Chirp HD Masculino", "es-ES", "es-ES-Chirp-HD-D", "Chirp HD", "Masculino"),
+    VoicePreset("chirp-f1", "Chirp HD Femenino 1", "es-ES", "es-ES-Chirp-HD-F", "Chirp HD", "Femenino"),
+    VoicePreset("chirp-f2", "Chirp HD Femenino 2", "es-ES", "es-ES-Chirp-HD-O", "Chirp HD", "Femenino"),
+    // Studio — highest quality classic voices
     VoicePreset("studio-m", "Studio Masculino", "es-ES", "es-ES-Studio-F", "Studio", "Masculino"),
     VoicePreset("studio-f", "Studio Femenino", "es-ES", "es-ES-Studio-C", "Studio", "Femenino"),
     // Neural2 — very good quality (default)

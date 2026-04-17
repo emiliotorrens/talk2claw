@@ -499,7 +499,7 @@ private fun VoicePresetSelector(
                 expanded = expanded,
                 onDismissRequest = { expanded = false },
             ) {
-                val tiers = listOf("Studio", "Neural2", "Wavenet", "Standard")
+                val tiers = listOf("Chirp3 HD", "Chirp HD", "Studio", "Neural2", "Wavenet", "Standard")
                 tiers.forEach { tier ->
                     val presets = VOICE_PRESETS.filter { it.tier == tier }
                     if (presets.isNotEmpty()) {
@@ -563,6 +563,8 @@ private fun TierBadge(tier: String) {
 
 @Composable
 private fun tierColor(tier: String): Color = when (tier) {
+    "Chirp3 HD" -> Color(0xFFE91E63)
+    "Chirp HD"  -> Color(0xFFFF5722)
     "Studio"   -> Color(0xFF9C27B0)
     "Neural2"  -> Color(0xFF1976D2)
     "Wavenet"  -> Color(0xFF388E3C)

@@ -91,14 +91,12 @@ Speaker verification framework is implemented but requires an ONNX embedding mod
 
 | Voice | Type | Quality |
 |---|---|---|
-| es-ES-Neural2-B (default) | Male | ⭐⭐⭐⭐ |
-| es-ES-Neural2-A | Female | ⭐⭐⭐⭐ |
-| es-ES-Studio-B | Male | ⭐⭐⭐⭐⭐ |
-| es-ES-Studio-A | Female | ⭐⭐⭐⭐⭐ |
-| es-ES-Wavenet-B | Male | ⭐⭐⭐ |
-| es-ES-Wavenet-A | Female | ⭐⭐⭐ |
-| es-ES-Standard-B | Male | ⭐⭐ |
-| es-ES-Standard-A | Female | ⭐⭐ |
+| es-ES-Chirp3-HD-* (8 voces) | Chirp3 HD | ⭐⭐⭐⭐⭐ |
+| es-ES-Chirp-HD-* (3 voces) | Chirp HD | ⭐⭐⭐⭐⭐ |
+| es-ES-Studio-F / C | Studio | ⭐⭐⭐⭐ |
+| es-ES-Neural2-B / A | Neural2 | ⭐⭐⭐⭐ |
+| es-ES-Wavenet-B / A | Wavenet | ⭐⭐⭐ |
+| es-ES-Standard-B / A | Standard | ⭐⭐ |
 
 Speed adjustable from 0.8x to 1.3x in Settings.
 
@@ -131,6 +129,13 @@ Requirements: Android SDK (API 35), Java 17, Gradle 8.11.1
 - Internet connection
 - OpenClaw gateway accessible (same network or Tailscale)
 - Google Cloud API key with [Text-to-Speech API](https://console.cloud.google.com/apis/api/texttospeech.googleapis.com) enabled
+
+## Roadmap
+
+- **Phase 8**: gRPC Streaming TTS — migrate from REST to streaming synthesis (~100ms first audio vs ~300ms)
+- **Phase 9**: Gemini Live / audio-native exploration — evaluate direct audio generation
+- Custom "Oye Claw" wake word (Picovoice Console)
+- Bundle ECAPA-TDNN model for real speaker verification
 
 ## Inspiration
 
