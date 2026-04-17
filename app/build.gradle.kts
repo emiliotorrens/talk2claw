@@ -67,8 +67,9 @@ dependencies {
     // Picovoice Porcupine (wake word detection)
     implementation("ai.picovoice:porcupine-android:4.0.0")
 
-    // ONNX Runtime (speaker verification framework)
-    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.17.0")
+    // ONNX Runtime (speaker verification) — disabled until model is bundled
+    // Adds ~60MB to APK. Re-enable when ECAPA-TDNN model is ready.
+    // implementation("com.microsoft.onnxruntime:onnxruntime-android:1.17.0")
 
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
