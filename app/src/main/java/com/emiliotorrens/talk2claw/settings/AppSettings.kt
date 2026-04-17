@@ -10,7 +10,7 @@ data class AppSettings(
     val gatewayToken: String = "",
     /** Persisted device token after first successful gateway pairing. */
     val deviceToken: String = "",
-    val ttsVoice: String = "es-ES-Neural2-B",  // Male Spanish Neural2 voice (better quality)
+    val ttsVoice: String = "es-ES-Neural2-B",
     val ttsLanguageCode: String = "es-ES",
     val googleCloudApiKey: String = "",
     val keepScreenOn: Boolean = true,
@@ -19,4 +19,18 @@ data class AppSettings(
     val modelAlias: String = "sonnet",
     /** Whether thinking/reasoning mode is enabled. */
     val thinkingEnabled: Boolean = false,
+
+    // ── Wake Word (Picovoice Porcupine) ──
+    val wakeWordEnabled: Boolean = false,
+    val picovoiceAccessKey: String = "",
+
+    // ── Voice Match (Speaker Verification) ──
+    val voiceMatchEnabled: Boolean = false,
+    val voiceMatchThreshold: Float = 0.7f,
+    /** Enrolled speaker embedding as JSON float array string. */
+    val enrolledEmbedding: String = "",
+
+    // ── Interruption Mode ──
+    /** "auto" = interruption with headphones only, "always" = current behavior, "never" = wait for TTS */
+    val interruptionMode: String = "auto",
 )

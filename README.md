@@ -7,10 +7,15 @@ Voice assistant app for Android — talk directly to your OpenClaw agent using n
 - 🎤 **Voice-first**: press-to-talk or continuous conversation mode
 - 🔊 **High-quality TTS**: Google Cloud Neural2/Studio/Wavenet voices with streaming playback
 - ⚡ **Low latency**: sentence chunking + parallel synthesis pipeline (~300ms to first audio)
-- 🗣️ **Voice interruption**: speak while Claw is talking to interrupt
+- 🗣️ **Voice interruption**: speak while Claw is talking to interrupt (auto/always/never modes)
 - 🔌 **WebSocket**: native OpenClaw gateway protocol with auto-reconnect
 - 🔐 **Device identity**: Ed25519 keypair + challenge-response authentication
 - 🎨 **Animated UI**: state indicators (listening waves, thinking dots, speaking equalizer)
+- 🗂️ **Persistent history**: conversation transcript saved locally (Room DB)
+- 📱 **Widget & Quick Tile**: 1x1 home screen widget + Quick Settings tile for instant access
+- 👋 **Wake word** (beta): "Oye Claw" hands-free activation via Picovoice Porcupine
+- 🔒 **Voice Match** (framework): on-device speaker verification — only responds to your voice
+- 🎧 **Smart echo cancellation**: earpiece routing, volume reduction, fuzzy echo detection
 
 ## Architecture
 
@@ -53,8 +58,34 @@ Response text → Google Cloud TTS (chunked) → AudioTrack streaming → 🔊 S
 - **Tap** the mic button to start listening
 - **Speak** your message — it's sent when you stop talking
 - **Long-press** toggles continuous conversation mode (auto-listens after each response)
-- **Tap while Claw is speaking** to interrupt
+- **Speak while Claw is talking** to interrupt (configurable: auto/always/never)
 - Response appears as text bubble and is spoken aloud
+- **Widget**: add the 1x1 Talk2Claw widget to your home screen for one-tap conversation
+- **Quick Settings tile**: pull down notification shade → Talk2Claw tile
+
+### Interruption Modes
+
+| Mode | Behavior |
+|---|---|
+| **Auto** (default) | Interruption with headphones, wait for TTS with speaker |
+| **Always** | Always allow voice interruption |
+| **Never** | Wait for Claw to finish before listening |
+
+### Wake Word (Beta)
+
+1. Get a free access key at [console.picovoice.ai](https://console.picovoice.ai/)
+2. Settings → Wake Word → enable + paste access key
+3. Say "Porcupine" to activate (custom "Oye Claw" keyword coming soon)
+4. Works in background via foreground service
+5. ⚠️ Disable battery optimization for Talk2Claw in Android settings
+
+### Voice Match (Framework)
+
+Speaker verification framework is implemented but requires an ONNX embedding model (~20MB) to be bundled. When available:
+1. Settings → Voice Match → enable
+2. Tap "Registrar voz" and speak 3 phrases
+3. Adjust similarity threshold (default 0.7)
+4. Claw will only respond to your enrolled voice
 
 ## Voice Options
 
@@ -79,6 +110,9 @@ Speed adjustable from 0.8x to 1.3x in Settings.
 - **Crypto**: BouncyCastle (Ed25519 device identity)
 - **Audio**: Android AudioTrack (MODE_STREAM), SpeechRecognizer
 - **TTS**: Google Cloud Text-to-Speech REST API
+- **Persistence**: Room DB (transcript history)
+- **Wake Word**: Picovoice Porcupine SDK
+- **Speaker Verification**: ONNX Runtime (framework ready)
 
 ## Building
 

@@ -93,20 +93,29 @@ No esperar a tener todo el audio para empezar a reproducir.
 ### Fase 5 — Polish UX ✅
 - [x] Animaciones de estado
 - [x] Chat bubbles, dark/light theme, haptics
-- [ ] Wake word "Oye Claw" (movido a Fase 7)
-- [ ] Widget/tile quick-launch
-- [ ] Historial de conversación persistente (Room DB)
+- [x] Widget 1x1 + Quick Settings Tile
+- [x] Historial de conversación persistente (Room DB)
 
-### Fase 6 — Model & Thinking Selector (en progreso)
-- [ ] Dropdown de modelo: Flash / Sonnet / Opus
-- [ ] Toggle thinking on/off
-- [ ] Se aplica vía /model y /reasoning como chat commands
+### Fase 6 — Model & Thinking Selector ✅
+- [x] Dropdown de modelo: Flash / Sonnet / Opus
+- [x] Toggle thinking on/off
+- [x] Se aplica vía /model y /reasoning como chat commands
 
-### Fase 7 — Voice Match On-Device (pendiente)
-- [ ] Speaker verification con modelo on-device (SpeechBrain/Resemblyzer)
-- [ ] Enrollment de 3-5 frases desde Settings
-- [ ] Cosine similarity threshold
-- [ ] Combinar con wake word "Oye Claw"
+### Fase 7 — Wake Word + Voice Match + Echo Fix ✅
+- [x] Wake word engine (Picovoice Porcupine) — placeholder "porcupine" keyword
+  - TODO: Custom "Oye Claw" .ppn via Picovoice Console
+  - TODO: Spanish model file (.pv) for better accuracy
+- [x] Speaker verification framework (ONNX Runtime)
+  - TODO: Bundle ECAPA-TDNN model (~20MB) for actual inference
+  - [x] Enrollment flow (3 phrases), cosine similarity, threshold config
+- [x] Echo cancellation improvements:
+  - [x] MODE_IN_COMMUNICATION earpiece routing
+  - [x] Volume reduction (40%) without headphones
+  - [x] Levenshtein fuzzy matching in isEcho()
+  - [x] Partial substring check
+  - [x] Lower threshold (0.50) without headphones
+  - [x] Headphone detection (wired + Bluetooth)
+  - [x] Interruption mode setting (auto/always/never)
 
 ---
 

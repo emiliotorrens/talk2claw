@@ -11,14 +11,13 @@ import com.emiliotorrens.talk2claw.MainActivity
 import com.emiliotorrens.talk2claw.R
 import com.emiliotorrens.talk2claw.Talk2ClawApp
 import com.emiliotorrens.talk2claw.openclaw.GatewayNode
+import com.emiliotorrens.talk2claw.settings.SettingsManager
+import com.emiliotorrens.talk2claw.voice.WakeWordEngine
 import kotlinx.coroutines.*
-import kotlinx.coroutines.flow.collect
-import kotlinx.coroutines.flow.drop
 
 /**
  * Foreground service that keeps the GatewayNode WebSocket alive while the app
- * is in the background. It observes the connection state and updates the
- * persistent notification accordingly.
+ * is in the background. Also manages wake word detection when enabled.
  */
 class GatewayService : Service() {
 
@@ -46,11 +45,14 @@ class GatewayService : Service() {
     private val gatewayNode: GatewayNode
         get() = (application as Talk2ClawApp).gatewayNode
 
+    private var wakeWordEngine: WakeWordEngine? = null
+
     override fun onCreate() {
         super.onCreate()
         Log.d(TAG, "Service created")
         startForeground(NOTIFICATION_ID, buildNotification("Conectando..."))
         observeConnectionState()
+        startWakeWordIfEnabled()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -66,8 +68,40 @@ class GatewayService : Service() {
 
     override fun onDestroy() {
         Log.d(TAG, "Service destroyed")
+        stopWakeWord()
         scope.cancel()
         super.onDestroy()
+    }
+
+    // ── Wake Word ────────────────────────────────────────────
+
+    private fun startWakeWordIfEnabled() {
+        val settings = SettingsManager.load()
+        if (!settings.wakeWordEnabled || settings.picovoiceAccessKey.isBlank()) return
+
+        try {
+            val engine = WakeWordEngine(settings.picovoiceAccessKey)
+            engine.onWakeWordDetected = {
+                Log.i(TAG, "Wake word detected — notifying app")
+                (application as Talk2ClawApp).onWakeWordDetected()
+            }
+            engine.start()
+            wakeWordEngine = engine
+            Log.i(TAG, "Wake word engine started in service")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to start wake word in service: ${e.message}")
+        }
+    }
+
+    private fun stopWakeWord() {
+        wakeWordEngine?.stop()
+        wakeWordEngine = null
+    }
+
+    /** Called when settings change to restart/stop wake word engine. */
+    fun restartWakeWord() {
+        stopWakeWord()
+        startWakeWordIfEnabled()
     }
 
     // ── Notification ─────────────────────────────────────────

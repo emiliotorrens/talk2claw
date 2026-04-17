@@ -22,6 +22,11 @@ import com.emiliotorrens.talk2claw.ui.theme.Talk2ClawTheme
 
 class MainActivity : ComponentActivity() {
 
+    companion object {
+        /** Intent extra to auto-start conversation (used by widget and tile). */
+        const val EXTRA_START_CONVERSATION = "start_conversation"
+    }
+
     private val viewModel: MainViewModel by viewModels()
 
     private val micPermissionLauncher = registerForActivityResult(
@@ -45,6 +50,9 @@ class MainActivity : ComponentActivity() {
 
         // Start foreground service to keep WebSocket alive in the background
         GatewayService.start(this)
+
+        // Check if launched with auto-start conversation intent
+        handleStartConversationIntent(intent)
 
         setContent {
             Talk2ClawTheme {
@@ -75,6 +83,22 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
+        }
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        handleStartConversationIntent(intent)
+    }
+
+    private fun handleStartConversationIntent(intent: android.content.Intent?) {
+        if (intent?.getBooleanExtra(EXTRA_START_CONVERSATION, false) == true) {
+            // Auto-start conversation if not already active
+            if (!viewModel.conversationActive.value) {
+                viewModel.toggleConversation()
+            }
+            // Clear the extra so it doesn't re-trigger on config change
+            intent.removeExtra(EXTRA_START_CONVERSATION)
         }
     }
 }

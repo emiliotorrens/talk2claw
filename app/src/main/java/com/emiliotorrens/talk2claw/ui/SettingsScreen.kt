@@ -43,18 +43,46 @@ fun SettingsScreen(
     var token by remember { mutableStateOf(settings.gatewayToken) }
     var gcloudKey by remember { mutableStateOf(settings.googleCloudApiKey) }
 
-    // Voice state — resolve preset from stored voice name for backward compat
+    // Voice
     var selectedPreset by remember {
         mutableStateOf(findPresetByVoiceName(settings.ttsVoice))
     }
     var speakingRate by remember { mutableStateOf(settings.speakingRate) }
 
-    // Model & thinking state
+    // Model & thinking
     var modelAlias by remember { mutableStateOf(settings.modelAlias) }
     var thinkingEnabled by remember { mutableStateOf(settings.thinkingEnabled) }
 
+    // Wake word
+    var wakeWordEnabled by remember { mutableStateOf(settings.wakeWordEnabled) }
+    var picovoiceAccessKey by remember { mutableStateOf(settings.picovoiceAccessKey) }
+
+    // Voice match
+    var voiceMatchEnabled by remember { mutableStateOf(settings.voiceMatchEnabled) }
+    var voiceMatchThreshold by remember { mutableStateOf(settings.voiceMatchThreshold) }
+
+    // Interruption mode
+    var interruptionMode by remember { mutableStateOf(settings.interruptionMode) }
+
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
+
+    fun buildSettings() = settings.copy(
+        gatewayHost = host.trim(),
+        gatewayPort = port.toIntOrNull() ?: 18789,
+        gatewayToken = token.trim(),
+        googleCloudApiKey = gcloudKey.trim(),
+        ttsVoice = selectedPreset.voiceName,
+        ttsLanguageCode = selectedPreset.languageCode,
+        speakingRate = speakingRate,
+        modelAlias = modelAlias,
+        thinkingEnabled = thinkingEnabled,
+        wakeWordEnabled = wakeWordEnabled,
+        picovoiceAccessKey = picovoiceAccessKey.trim(),
+        voiceMatchEnabled = voiceMatchEnabled,
+        voiceMatchThreshold = voiceMatchThreshold,
+        interruptionMode = interruptionMode,
+    )
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -68,17 +96,7 @@ fun SettingsScreen(
                 },
                 actions = {
                     TextButton(onClick = {
-                        onSave(settings.copy(
-                            gatewayHost = host.trim(),
-                            gatewayPort = port.toIntOrNull() ?: 18789,
-                            gatewayToken = token.trim(),
-                            googleCloudApiKey = gcloudKey.trim(),
-                            ttsVoice = selectedPreset.voiceName,
-                            ttsLanguageCode = selectedPreset.languageCode,
-                            speakingRate = speakingRate,
-                            modelAlias = modelAlias,
-                            thinkingEnabled = thinkingEnabled,
-                        ))
+                        onSave(buildSettings())
                         onBack()
                     }) {
                         Text("Guardar")
@@ -171,11 +189,136 @@ fun SettingsScreen(
                 onPreview = { onPreviewVoice(it) },
             )
 
-            // ── Speaking rate slider ───────────────────────────
             SpeakingRateSlider(
                 rate = speakingRate,
                 onRateChanged = { speakingRate = it },
             )
+
+            HorizontalDivider()
+
+            // ── Interruption Mode ─────────────────────────────
+            Text("Interrupción de voz", style = MaterialTheme.typography.titleMedium)
+
+            InterruptionModeSelector(
+                selectedMode = interruptionMode,
+                onModeSelected = { interruptionMode = it },
+            )
+
+            HorizontalDivider()
+
+            // ── Wake Word ─────────────────────────────────────
+            Text("Wake Word", style = MaterialTheme.typography.titleMedium)
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("\"Oye Claw\" (Porcupine)", style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        "Activa la conversación por voz sin tocar. Consume batería en segundo plano.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                    )
+                }
+                Switch(
+                    checked = wakeWordEnabled,
+                    onCheckedChange = { wakeWordEnabled = it },
+                )
+            }
+
+            if (wakeWordEnabled) {
+                OutlinedTextField(
+                    value = picovoiceAccessKey,
+                    onValueChange = { picovoiceAccessKey = it },
+                    label = { Text("Picovoice Access Key") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    supportingText = {
+                        Text("Obtener en console.picovoice.ai")
+                    }
+                )
+
+                Text(
+                    "⚠️ Desactiva la optimización de batería para Talk2Claw en los ajustes del sistema.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error.copy(alpha = 0.8f),
+                )
+            }
+
+            HorizontalDivider()
+
+            // ── Voice Match ───────────────────────────────────
+            Text("Voice Match", style = MaterialTheme.typography.titleMedium)
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Verificación de hablante", style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        "Solo responde a tu voz. Requiere modelo ONNX (no incluido aún).",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                    )
+                }
+                Switch(
+                    checked = voiceMatchEnabled,
+                    onCheckedChange = { voiceMatchEnabled = it },
+                )
+            }
+
+            if (voiceMatchEnabled) {
+                // Threshold slider
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Text("Umbral de similitud", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            "${"%.2f".format(voiceMatchThreshold)}",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                    Slider(
+                        value = voiceMatchThreshold,
+                        onValueChange = { voiceMatchThreshold = it },
+                        valueRange = 0.5f..0.95f,
+                        steps = 8,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+
+                // Enrollment button
+                val enrollmentStatus = if (settings.enrolledEmbedding.isNotBlank())
+                    "✅ Voz registrada" else "❌ Sin registrar"
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(enrollmentStatus, style = MaterialTheme.typography.bodyMedium)
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                snackbarHostState.showSnackbar(
+                                    "Modelo ONNX no disponible aún — enrollment desactivado",
+                                    duration = SnackbarDuration.Short,
+                                )
+                            }
+                        }
+                    ) {
+                        Text("Registrar voz")
+                    }
+                }
+            }
 
             HorizontalDivider()
 
@@ -240,6 +383,75 @@ fun SettingsScreen(
     }
 }
 
+// ── Interruption mode selector ─────────────────────────────────────────────
+
+private data class InterruptionOption(
+    val mode: String,
+    val label: String,
+    val description: String,
+)
+
+private val INTERRUPTION_OPTIONS = listOf(
+    InterruptionOption("auto", "Automático", "Interrupción con auriculares, sin interrupción con altavoz"),
+    InterruptionOption("always", "Siempre", "Siempre permitir interrumpir (comportamiento actual)"),
+    InterruptionOption("never", "Nunca", "Esperar a que Claw termine antes de escuchar"),
+)
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun InterruptionModeSelector(
+    selectedMode: String,
+    onModeSelected: (String) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val selected = INTERRUPTION_OPTIONS.find { it.mode == selectedMode } ?: INTERRUPTION_OPTIONS[0]
+
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { expanded = it },
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        OutlinedTextField(
+            value = selected.label,
+            onValueChange = {},
+            readOnly = true,
+            label = { Text("Modo de interrupción") },
+            supportingText = { Text(selected.description, style = MaterialTheme.typography.labelSmall) },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            modifier = Modifier
+                .menuAnchor(MenuAnchorType.PrimaryNotEditable)
+                .fillMaxWidth(),
+            singleLine = true,
+            colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors(),
+        )
+
+        ExposedDropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+        ) {
+            INTERRUPTION_OPTIONS.forEach { option ->
+                DropdownMenuItem(
+                    text = {
+                        Column {
+                            Text(option.label, style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                option.description,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                            )
+                        }
+                    },
+                    onClick = {
+                        onModeSelected(option.mode)
+                        expanded = false
+                    },
+                    contentPadding = ExposedDropdownMenuDefaults.ItemContentPadding,
+                )
+            }
+        }
+    }
+}
+
 // ── Voice preset dropdown ──────────────────────────────────────────────────
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -287,12 +499,10 @@ private fun VoicePresetSelector(
                 expanded = expanded,
                 onDismissRequest = { expanded = false },
             ) {
-                // Group by tier
                 val tiers = listOf("Studio", "Neural2", "Wavenet", "Standard")
                 tiers.forEach { tier ->
                     val presets = VOICE_PRESETS.filter { it.tier == tier }
                     if (presets.isNotEmpty()) {
-                        // Tier header
                         DropdownMenuItem(
                             text = {
                                 Text(
@@ -328,7 +538,6 @@ private fun VoicePresetSelector(
             }
         }
 
-        // Preview button
         FilledTonalIconButton(
             onClick = { onPreview(selectedPreset) },
         ) {
@@ -354,10 +563,10 @@ private fun TierBadge(tier: String) {
 
 @Composable
 private fun tierColor(tier: String): Color = when (tier) {
-    "Studio"   -> Color(0xFF9C27B0)  // Purple — premium
-    "Neural2"  -> Color(0xFF1976D2)  // Blue — great
-    "Wavenet"  -> Color(0xFF388E3C)  // Green — good
-    else       -> Color(0xFF757575)  // Grey — standard
+    "Studio"   -> Color(0xFF9C27B0)
+    "Neural2"  -> Color(0xFF1976D2)
+    "Wavenet"  -> Color(0xFF388E3C)
+    else       -> Color(0xFF757575)
 }
 
 // ── Speaking rate slider ───────────────────────────────────────────────────
@@ -367,7 +576,6 @@ private fun SpeakingRateSlider(
     rate: Float,
     onRateChanged: (Float) -> Unit,
 ) {
-    // Range: 0.8 to 1.3, steps of 0.1 → 6 discrete values → steps=4
     val steps = 4
     val minRate = 0.8f
     val maxRate = 1.3f
@@ -388,7 +596,6 @@ private fun SpeakingRateSlider(
         Slider(
             value = rate,
             onValueChange = { raw ->
-                // Snap to nearest 0.1
                 val snapped = (raw * 10).roundToInt() / 10f
                 onRateChanged(snapped)
             },

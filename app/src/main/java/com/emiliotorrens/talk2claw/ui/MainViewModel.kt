@@ -1,14 +1,18 @@
 package com.emiliotorrens.talk2claw.ui
 
 import android.app.Application
+import android.bluetooth.BluetoothAdapter
+import android.media.AudioManager
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.emiliotorrens.talk2claw.Talk2ClawApp
+import com.emiliotorrens.talk2claw.data.TranscriptEntity
 import com.emiliotorrens.talk2claw.openclaw.GatewayNode
 import com.emiliotorrens.talk2claw.openclaw.OpenClawBridge
 import com.emiliotorrens.talk2claw.settings.AppSettings
 import com.emiliotorrens.talk2claw.settings.SettingsManager
+import com.emiliotorrens.talk2claw.voice.SpeakerVerification
 import com.emiliotorrens.talk2claw.voice.SpeechToText
 import com.emiliotorrens.talk2claw.voice.TextToSpeech
 import com.emiliotorrens.talk2claw.voice.VoicePreset
@@ -17,20 +21,24 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
+
 class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     companion object {
         private const val TAG = "MainVM"
+
         /**
          * Minimum word-overlap ratio (STT words that appear in TTS text)
          * above which we treat the STT result as microphone echo and discard it.
-         * Conservative threshold — better to miss an interruption than to eat user speech.
          */
         internal const val ECHO_THRESHOLD = 0.65f
 
+        /** Lower echo threshold when using speaker (no headphones). */
+        internal const val ECHO_THRESHOLD_SPEAKER = 0.50f
+
         /**
          * Returns true if the STT result is likely microphone echo of the TTS output.
-         * Extracted to companion object for unit testability.
+         * Uses exact word overlap + fuzzy matching (Levenshtein) + partial substring check.
          */
         internal fun isEcho(
             sttText: String,
@@ -50,9 +58,52 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 .filter { it.length > 1 }
                 .toSet()
 
-            val matchCount = sttWords.count { it in ttsWords }
+            // Exact match count
+            var matchCount = sttWords.count { it in ttsWords }
+
+            // Fuzzy match: check unmatched STT words against TTS words with Levenshtein
+            val unmatchedStt = sttWords.filter { it !in ttsWords }
+            for (sttWord in unmatchedStt) {
+                for (ttsWord in ttsWords) {
+                    if (levenshteinDistance(sttWord, ttsWord) <= 1) {
+                        matchCount++
+                        break
+                    }
+                }
+            }
+
             val overlap = matchCount.toFloat() / sttWords.size.toFloat()
-            return overlap > threshold
+            if (overlap > threshold) return true
+
+            // Partial substring check: if STT text is largely contained in TTS text
+            val sttLower = sttText.lowercase().trim()
+            val ttsLower = ttsText.lowercase()
+            if (sttLower.length > 5 && ttsLower.contains(sttLower)) return true
+
+            return false
+        }
+
+        /**
+         * Levenshtein edit distance between two strings.
+         */
+        internal fun levenshteinDistance(a: String, b: String): Int {
+            val m = a.length
+            val n = b.length
+            if (m == 0) return n
+            if (n == 0) return m
+
+            var prev = IntArray(n + 1) { it }
+            var curr = IntArray(n + 1)
+
+            for (i in 1..m) {
+                curr[0] = i
+                for (j in 1..n) {
+                    val cost = if (a[i - 1] == b[j - 1]) 0 else 1
+                    curr[j] = minOf(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost)
+                }
+                val tmp = prev; prev = curr; curr = tmp
+            }
+            return prev[n]
         }
     }
 
@@ -60,6 +111,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     val stt = SpeechToText(app.applicationContext)
     private var tts: TextToSpeech
+    private val speakerVerification = SpeakerVerification()
+    private val audioManager = app.getSystemService(AudioManager::class.java)
 
     /** Primary connection: WebSocket node to the gateway. */
     private val gatewayNode: GatewayNode
@@ -67,6 +120,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Fallback bridge (HTTP REST) — used when WebSocket is unavailable. */
     private var bridge: OpenClawBridge
+
+    /** Room database for persistent history. */
+    private val db get() = getApplication<Talk2ClawApp>().database
 
     // ── UI state ────────────────────────────────────────────────
 
@@ -95,10 +151,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     /**
      * Set to true when the user interrupts TTS playback.
-     * Prevents the original TTS-completion callback from restarting the pipeline
-     * (the interruption handler already launched a new coroutine for that).
+     * Prevents the original TTS-completion callback from restarting the pipeline.
      */
     @Volatile private var wasInterrupted = false
+
+    /** Saved media volume level for restoration after TTS. */
+    private var savedMediaVolume: Int = -1
 
     // ── Initialisation ──────────────────────────────────────────
 
@@ -119,7 +177,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             if (gatewayNode.isConfigured) {
                 gatewayNode.connect()
             } else {
-                // Fall back to HTTP bridge check
                 bridge.checkConnection()
             }
         }
@@ -135,11 +192,103 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 wasConnected = nowConnected
             }
         }
+
+        // Listen for wake word events from GatewayService
+        viewModelScope.launch {
+            getApplication<Talk2ClawApp>().wakeWordEvents.collect {
+                Log.i(TAG, "Wake word event received — starting conversation")
+                if (!_conversationActive.value) {
+                    startConversation()
+                }
+            }
+        }
+
+        // Load persistent history from Room
+        viewModelScope.launch {
+            try {
+                val entities = db.transcriptDao().getRecent(50)
+                // getRecent returns DESC order, reverse for display
+                val entries = entities.reversed().map { entity ->
+                    when (entity.role) {
+                        "user" -> TranscriptEntry.User(entity.text)
+                        "claw" -> TranscriptEntry.Claw(entity.text)
+                        else -> TranscriptEntry.Error(entity.text)
+                    }
+                }
+                if (entries.isNotEmpty()) {
+                    _transcript.value = entries
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to load transcript from Room: ${e.message}")
+            }
+        }
+    }
+
+    // ── Headphone detection ─────────────────────────────────────
+
+    /**
+     * Returns true if headphones (wired or Bluetooth) are connected.
+     */
+    private fun isHeadphonesConnected(): Boolean {
+        @Suppress("DEPRECATION")
+        val wired = audioManager?.isWiredHeadsetOn == true
+        val bluetooth = try {
+            @Suppress("DEPRECATION")
+            val adapter = BluetoothAdapter.getDefaultAdapter()
+            adapter?.isEnabled == true && audioManager?.isBluetoothA2dpOn == true
+        } catch (_: Exception) {
+            false
+        }
+        return wired || bluetooth
+    }
+
+    /**
+     * Returns whether voice interruption is allowed based on settings and hardware.
+     */
+    private fun isInterruptionAllowed(): Boolean {
+        val mode = _settings.value.interruptionMode
+        return when (mode) {
+            "always" -> true
+            "never" -> false
+            else -> isHeadphonesConnected() // "auto"
+        }
+    }
+
+    /**
+     * Get the effective echo threshold — lower when using speaker (no headphones).
+     */
+    private fun getEchoThreshold(): Float {
+        return if (isHeadphonesConnected()) ECHO_THRESHOLD else ECHO_THRESHOLD_SPEAKER
+    }
+
+    // ── Audio routing for echo reduction ─────────────────────────
+
+    /**
+     * Set communication audio mode (routes through earpiece, reducing echo).
+     * Only applies when no headphones are connected.
+     */
+    private fun setEchoCancellationMode(enabled: Boolean) {
+        if (isHeadphonesConnected()) return
+
+        if (enabled) {
+            audioManager?.mode = AudioManager.MODE_IN_COMMUNICATION
+            // Lower media volume by 40%
+            val maxVol = audioManager?.getStreamMaxVolume(AudioManager.STREAM_MUSIC) ?: 15
+            val currentVol = audioManager?.getStreamVolume(AudioManager.STREAM_MUSIC) ?: maxVol
+            savedMediaVolume = currentVol
+            val loweredVol = (currentVol * 0.6f).toInt().coerceAtLeast(1)
+            audioManager?.setStreamVolume(AudioManager.STREAM_MUSIC, loweredVol, 0)
+        } else {
+            audioManager?.mode = AudioManager.MODE_NORMAL
+            if (savedMediaVolume >= 0) {
+                audioManager?.setStreamVolume(AudioManager.STREAM_MUSIC, savedMediaVolume, 0)
+                savedMediaVolume = -1
+            }
+        }
     }
 
     /**
      * Synthesize and play a short sample using the given voice preset.
-     * Used from the Settings screen to preview a voice before saving.
      */
     fun previewVoice(preset: VoicePreset) {
         val previewSettings = _settings.value.copy(
@@ -157,7 +306,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _settings.value = newSettings
         tts = TextToSpeech(newSettings)
         bridge = OpenClawBridge(newSettings)
-        // Apply settings to WebSocket node (will reconnect)
         getApplication<Talk2ClawApp>().applyNewSettings(newSettings)
     }
 
@@ -179,7 +327,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** Send /reasoning on|off silently if connected. Shows a snackbar on success. */
+    /** Send /reasoning on|off silently if connected. */
     fun sendThinkingCommand(enabled: Boolean) {
         viewModelScope.launch {
             if (gatewayNode.isConnected) {
@@ -192,12 +340,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** Consume a snackbar message (called after it is shown). */
-    fun consumeSnackbar() {
-        _snackbarMessage.value = null
-    }
+    fun consumeSnackbar() { _snackbarMessage.value = null }
 
-    /** Apply current model/reasoning settings after a fresh WebSocket connection. */
     private fun applyModelAndReasoning() {
         viewModelScope.launch {
             val s = _settings.value
@@ -208,7 +352,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     // ── Connection ──────────────────────────────────────────────
 
-    /** Exposes the WebSocket connection state as primary indicator. */
     val connectionState: StateFlow<GatewayNode.ConnectionState>
         get() = gatewayNode.connectionState
 
@@ -231,7 +374,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun toggleSingleShotMode() {
         _singleShotMode.value = !_singleShotMode.value
-        // Apply immediately if conversation is already active
         if (_conversationActive.value) {
             stt.continuousMode = !_singleShotMode.value
         }
@@ -253,6 +395,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         wasInterrupted = false
         stt.cancel()
         tts.stop()
+        setEchoCancellationMode(false)
         _pipelineState.value = PipelineState.Idle
     }
 
@@ -267,15 +410,21 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (currentState == PipelineState.Speaking) {
             val ttsText = tts.currentText.value
 
-            if (isEcho(text, ttsText)) {
+            if (isEcho(text, ttsText, getEchoThreshold())) {
                 Log.d(TAG, "Echo filtered during Speaking: '${text.take(60)}'")
-                // STT will re-listen automatically via continuousMode silence recovery
+                return
+            }
+
+            // If interruption is not allowed, ignore
+            if (!isInterruptionAllowed()) {
+                Log.d(TAG, "Interruption not allowed (mode=${_settings.value.interruptionMode})")
                 return
             }
 
             Log.d(TAG, "Interruption! User said: $text")
             wasInterrupted = true
-            tts.stop() // cuts playback within ~50ms; speak() coroutine will unblock
+            tts.stop()
+            setEchoCancellationMode(false)
 
             addTranscript(TranscriptEntry.User(text))
             _pipelineState.value = PipelineState.Thinking
@@ -292,7 +441,31 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
 
-        // ── Normal path ──
+        // ── Speaker verification (if enabled) ──
+        val s = _settings.value
+        if (s.voiceMatchEnabled && s.enrolledEmbedding.isNotBlank()) {
+            viewModelScope.launch {
+                val verified = speakerVerification.verify(
+                    enrolledEmbeddingJson = s.enrolledEmbedding,
+                    threshold = s.voiceMatchThreshold,
+                )
+                if (!verified) {
+                    Log.d(TAG, "Speaker verification failed — ignoring STT result")
+                    _statusMessage.value = "Voz no reconocida"
+                    if (_conversationActive.value) {
+                        stt.resumeListening()
+                    }
+                    return@launch
+                }
+                processNormalSpeech(text)
+            }
+            return
+        }
+
+        processNormalSpeech(text)
+    }
+
+    private fun processNormalSpeech(text: String) {
         wasInterrupted = false
         Log.d(TAG, "User said: $text")
         addTranscript(TranscriptEntry.User(text))
@@ -305,11 +478,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     /**
      * Send a message to the gateway, speak the response, then resume listening.
-     * This is the core pipeline step, shared by normal and interruption flows.
-     *
-     * @param userText       The user's spoken text (shown in transcript).
-     * @param interruptionPrefix If true, prepends "[User interrupted previous response]"
-     *                           to the message sent to the gateway.
      */
     private suspend fun sendAndSpeak(userText: String, interruptionPrefix: Boolean) {
         val messageToSend = if (interruptionPrefix) {
@@ -327,28 +495,27 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 Log.d(TAG, "Claw: ${response.take(100)}")
                 addTranscript(TranscriptEntry.Claw(response))
 
-                // Reset interruption flag for this new speaking turn
                 wasInterrupted = false
                 _pipelineState.value = PipelineState.Speaking
 
-                // ── Phase 2: Start listening IN PARALLEL with TTS playback ──
-                // This enables real-time interruption detection.
-                // If STT fires during Speaking state, onSpeechResult() will handle it.
-                stt.resumeListening()
+                // Enable echo cancellation (earpiece routing + volume reduction)
+                setEchoCancellationMode(true)
 
-                // Phase 3: use streaming TTS to reduce first-audio latency.
-                // speakStreaming() falls back to speak() for single-sentence responses.
+                // Start parallel STT only if interruption is allowed
+                if (isInterruptionAllowed()) {
+                    stt.resumeListening()
+                }
+
                 tts.speakStreaming(response).fold(
                     onSuccess = {
-                        // Only resume normal listening if we weren't interrupted.
-                        // If wasInterrupted == true, the interruption handler already
-                        // launched a new sendAndSpeak coroutine — don't interfere.
+                        setEchoCancellationMode(false)
                         if (_conversationActive.value && !wasInterrupted) {
                             _pipelineState.value = PipelineState.Listening
                             stt.resumeListening()
                         }
                     },
                     onFailure = { err ->
+                        setEchoCancellationMode(false)
                         if (!wasInterrupted) {
                             Log.w(TAG, "TTS failed: ${err.message}")
                             _statusMessage.value = "TTS: ${err.message}"
@@ -357,7 +524,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                                 stt.resumeListening()
                             }
                         }
-                        // If wasInterrupted, the interruption handler takes over — do nothing.
                     }
                 )
             },
@@ -373,9 +539,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         )
     }
 
-    /**
-     * Sends a message using WebSocket if connected, falls back to HTTP bridge.
-     */
     private suspend fun sendMessageToGateway(message: String): Result<String> {
         return if (gatewayNode.isConnected) {
             Log.d(TAG, "Sending via WebSocket")
@@ -387,25 +550,54 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    // ── Echo cancellation (logic in companion object) ─────────────────────────
-    // isEcho() is in the companion object for unit testability.
-
-    // ── Transcript ──────────────────────────────────────────────
+    // ── Transcript (with Room persistence) ──────────────────────
 
     private fun addTranscript(entry: TranscriptEntry) {
         _transcript.value = _transcript.value + entry
+
+        // Persist to Room
+        viewModelScope.launch {
+            try {
+                val role = when (entry) {
+                    is TranscriptEntry.User -> "user"
+                    is TranscriptEntry.Claw -> "claw"
+                    is TranscriptEntry.Error -> "error"
+                }
+                val text = when (entry) {
+                    is TranscriptEntry.User -> entry.text
+                    is TranscriptEntry.Claw -> entry.text
+                    is TranscriptEntry.Error -> entry.text
+                }
+                db.transcriptDao().insert(TranscriptEntity(role = role, text = text))
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to persist transcript: ${e.message}")
+            }
+        }
     }
 
     fun clearTranscript() {
         _transcript.value = emptyList()
         bridge.resetConversation()
+        viewModelScope.launch {
+            try { db.transcriptDao().deleteAll() } catch (_: Exception) {}
+        }
     }
 
     override fun onCleared() {
         stt.destroy()
         tts.stop()
+        setEchoCancellationMode(false)
         gatewayNode.cancelPendingCalls()
         super.onCleared()
+    }
+
+    // ── Speaker enrollment (called from Settings) ──────────────
+
+    /**
+     * Start speaker enrollment process. Returns the embedding JSON or null.
+     */
+    suspend fun enrollSpeaker(onProgress: suspend (Int, Int) -> Unit): String? {
+        return speakerVerification.enroll(onProgress)
     }
 
     // ── Types ───────────────────────────────────────────────────

@@ -4,10 +4,17 @@ import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.os.Build
+import androidx.room.Room
+import com.emiliotorrens.talk2claw.data.AppDatabase
 import com.emiliotorrens.talk2claw.openclaw.DeviceIdentity
 import com.emiliotorrens.talk2claw.openclaw.GatewayNode
 import com.emiliotorrens.talk2claw.settings.AppSettings
 import com.emiliotorrens.talk2claw.settings.SettingsManager
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
+
+// TODO: Clean old APKs from Google Drive after each new build (via rclone by user)
 
 /**
  * Application class — holds the shared GatewayNode instance so both the
@@ -27,11 +34,32 @@ class Talk2ClawApp : Application() {
     lateinit var gatewayNode: GatewayNode
         private set
 
+    /** Room database for persistent transcript history. */
+    lateinit var database: AppDatabase
+        private set
+
+    /**
+     * Shared flow for wake word detection events.
+     * GatewayService emits, MainViewModel collects to start conversation.
+     */
+    private val _wakeWordEvents = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val wakeWordEvents: SharedFlow<Unit> = _wakeWordEvents.asSharedFlow()
+
+    /** Emit a wake word detection event. */
+    fun onWakeWordDetected() {
+        _wakeWordEvents.tryEmit(Unit)
+    }
+
     override fun onCreate() {
         super.onCreate()
         SettingsManager.init(this)
         deviceIdentity = DeviceIdentity.loadOrCreate(this)
         gatewayNode = GatewayNode(SettingsManager.load(), deviceIdentity)
+        database = Room.databaseBuilder(
+            this,
+            AppDatabase::class.java,
+            "talk2claw.db",
+        ).build()
         createNotificationChannel()
     }
 

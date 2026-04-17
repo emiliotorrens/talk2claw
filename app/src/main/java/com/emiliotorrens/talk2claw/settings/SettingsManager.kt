@@ -26,6 +26,12 @@ object SettingsManager {
         speakingRate = prefs.getFloat("speaking_rate", 1.0f),
         modelAlias = prefs.getString("model_alias", "sonnet") ?: "sonnet",
         thinkingEnabled = prefs.getBoolean("thinking_enabled", false),
+        wakeWordEnabled = prefs.getBoolean("wake_word_enabled", false),
+        picovoiceAccessKey = prefs.getString("picovoice_access_key", "") ?: "",
+        voiceMatchEnabled = prefs.getBoolean("voice_match_enabled", false),
+        voiceMatchThreshold = prefs.getFloat("voice_match_threshold", 0.7f),
+        enrolledEmbedding = prefs.getString("enrolled_embedding", "") ?: "",
+        interruptionMode = prefs.getString("interruption_mode", "auto") ?: "auto",
     )
 
     fun save(s: AppSettings) {
@@ -41,6 +47,12 @@ object SettingsManager {
             .putFloat("speaking_rate", s.speakingRate)
             .putString("model_alias", s.modelAlias)
             .putBoolean("thinking_enabled", s.thinkingEnabled)
+            .putBoolean("wake_word_enabled", s.wakeWordEnabled)
+            .putString("picovoice_access_key", s.picovoiceAccessKey)
+            .putBoolean("voice_match_enabled", s.voiceMatchEnabled)
+            .putFloat("voice_match_threshold", s.voiceMatchThreshold)
+            .putString("enrolled_embedding", s.enrolledEmbedding)
+            .putString("interruption_mode", s.interruptionMode)
             .apply()
     }
 }

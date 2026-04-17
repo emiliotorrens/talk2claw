@@ -2,6 +2,7 @@ plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
+    id("com.google.devtools.ksp")
 }
 
 android {
@@ -58,13 +59,22 @@ dependencies {
     // DataStore for settings
     implementation("androidx.datastore:datastore-preferences:1.1.1")
 
-    // Google Cloud TTS → using REST API via OkHttp (no gRPC needed)
+    // Room (persistent history)
+    implementation("androidx.room:room-runtime:2.6.1")
+    implementation("androidx.room:room-ktx:2.6.1")
+    ksp("androidx.room:room-compiler:2.6.1")
+
+    // Picovoice Porcupine (wake word detection)
+    implementation("ai.picovoice:porcupine-android:4.0.0")
+
+    // ONNX Runtime (speaker verification framework)
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.17.0")
 
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
 
     // Unit tests
     testImplementation("junit:junit:4.13.2")
-    testImplementation("org.json:json:20231013")  // JSONObject in JVM tests
+    testImplementation("org.json:json:20231013")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
 }
