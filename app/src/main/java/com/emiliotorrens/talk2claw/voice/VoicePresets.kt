@@ -16,8 +16,8 @@ data class VoicePreset(
 /** Spanish voice presets ordered by quality (Studio > Neural2 > Wavenet > Standard). */
 val VOICE_PRESETS: List<VoicePreset> = listOf(
     // Studio — highest quality, most natural (premium pricing)
-    VoicePreset("studio-m", "Studio Masculino", "es-ES", "es-ES-Studio-B", "Studio", "Masculino"),
-    VoicePreset("studio-f", "Studio Femenino", "es-ES", "es-ES-Studio-A", "Studio", "Femenino"),
+    VoicePreset("studio-m", "Studio Masculino", "es-ES", "es-ES-Studio-F", "Studio", "Masculino"),
+    VoicePreset("studio-f", "Studio Femenino", "es-ES", "es-ES-Studio-C", "Studio", "Femenino"),
     // Neural2 — very good quality (default)
     VoicePreset("neural2-m", "Neural2 Masculino", "es-ES", "es-ES-Neural2-B", "Neural2", "Masculino"),
     VoicePreset("neural2-f", "Neural2 Femenino", "es-ES", "es-ES-Neural2-A", "Neural2", "Femenino"),
