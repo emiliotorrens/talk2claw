@@ -8,8 +8,11 @@ data class AppSettings(
     val gatewayHost: String = "",
     val gatewayPort: Int = 18789,
     val gatewayToken: String = "",
-    val ttsVoice: String = "es-ES-Wavenet-B",  // Male Spanish voice
+    /** Persisted device token after first successful gateway pairing. */
+    val deviceToken: String = "",
+    val ttsVoice: String = "es-ES-Neural2-B",  // Male Spanish Neural2 voice (better quality)
     val ttsLanguageCode: String = "es-ES",
     val googleCloudApiKey: String = "",
     val keepScreenOn: Boolean = true,
+    val speakingRate: Float = 1.0f,
 )

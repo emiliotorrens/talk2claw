@@ -18,10 +18,12 @@ object SettingsManager {
         gatewayHost = prefs.getString("gateway_host", "") ?: "",
         gatewayPort = prefs.getInt("gateway_port", 18789),
         gatewayToken = prefs.getString("gateway_token", "") ?: "",
-        ttsVoice = prefs.getString("tts_voice", "es-ES-Wavenet-B") ?: "es-ES-Wavenet-B",
+        deviceToken = prefs.getString("device_token", "") ?: "",
+        ttsVoice = prefs.getString("tts_voice", "es-ES-Neural2-B") ?: "es-ES-Neural2-B",
         ttsLanguageCode = prefs.getString("tts_lang", "es-ES") ?: "es-ES",
         googleCloudApiKey = prefs.getString("gcloud_api_key", "") ?: "",
         keepScreenOn = prefs.getBoolean("keep_screen_on", true),
+        speakingRate = prefs.getFloat("speaking_rate", 1.0f),
     )
 
     fun save(s: AppSettings) {
@@ -29,10 +31,12 @@ object SettingsManager {
             .putString("gateway_host", s.gatewayHost)
             .putInt("gateway_port", s.gatewayPort)
             .putString("gateway_token", s.gatewayToken)
+            .putString("device_token", s.deviceToken)
             .putString("tts_voice", s.ttsVoice)
             .putString("tts_lang", s.ttsLanguageCode)
             .putString("gcloud_api_key", s.googleCloudApiKey)
             .putBoolean("keep_screen_on", s.keepScreenOn)
+            .putFloat("speaking_rate", s.speakingRate)
             .apply()
     }
 }

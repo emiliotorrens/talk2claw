@@ -46,8 +46,14 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
 
+    // Core
+    implementation("androidx.core:core-ktx:1.13.1")
+
     // Network
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+
+    // Ed25519 crypto (device identity)
+    implementation("org.bouncycastle:bcprov-jdk18on:1.78.1")
 
     // DataStore for settings
     implementation("androidx.datastore:datastore-preferences:1.1.1")
@@ -56,4 +62,9 @@ dependencies {
 
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+
+    // Unit tests
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20231013")  // JSONObject in JVM tests
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
 }

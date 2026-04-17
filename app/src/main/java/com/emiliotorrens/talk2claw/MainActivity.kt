@@ -13,6 +13,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
+import com.emiliotorrens.talk2claw.service.GatewayService
 import com.emiliotorrens.talk2claw.settings.SettingsManager
 import com.emiliotorrens.talk2claw.ui.MainScreen
 import com.emiliotorrens.talk2claw.ui.MainViewModel
@@ -27,7 +28,7 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.RequestPermission()
     ) { granted ->
         if (!granted) {
-            // Could show a snackbar but STT will just fail gracefully
+            // STT will fail gracefully without mic permission
         }
     }
 
@@ -42,6 +43,9 @@ class MainActivity : ComponentActivity() {
             micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
         }
 
+        // Start foreground service to keep WebSocket alive in the background
+        GatewayService.start(this)
+
         setContent {
             Talk2ClawTheme {
                 Surface(
@@ -50,12 +54,16 @@ class MainActivity : ComponentActivity() {
                 ) {
                     var showSettings by remember { mutableStateOf(false) }
                     val settings by viewModel.settings.collectAsState()
+                    val connectionState by viewModel.connectionState.collectAsState()
 
                     if (showSettings) {
                         SettingsScreen(
                             settings = settings,
+                            connectionState = connectionState,
                             onSave = { viewModel.updateSettings(it) },
-                            onBack = { showSettings = false }
+                            onReconnect = { viewModel.reconnect() },
+                            onBack = { showSettings = false },
+                            onPreviewVoice = { viewModel.previewVoice(it) },
                         )
                     } else {
                         MainScreen(
