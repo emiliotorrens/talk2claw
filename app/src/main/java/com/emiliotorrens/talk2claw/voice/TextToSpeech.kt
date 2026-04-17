@@ -44,6 +44,48 @@ class TextToSpeech(private val settings: AppSettings) {
         /** Maximum chunk size in chars — split larger text here. */
         internal const val CHUNK_MAX = 200
 
+        // ── Markdown Cleanup ────────────────────────────────────────────
+        /**
+         * Strip markdown formatting so TTS doesn't read "asterisco asterisco".
+         * Preserves the readable text content.
+         */
+        internal fun stripMarkdown(text: String): String {
+            var s = text
+            // Code blocks (``` ... ```)
+            s = s.replace(Regex("```[\\s\\S]*?```"), " ")
+            // Inline code (`...`)
+            s = s.replace(Regex("`([^`]+)`"), "$1")
+            // Bold+italic (***text*** or ___text___)
+            s = s.replace(Regex("""\*{3}(.+?)\*{3}"""), "$1")
+            s = s.replace(Regex("""_{3}(.+?)_{3}"""), "$1")
+            // Bold (**text** or __text__)
+            s = s.replace(Regex("""\*{2}(.+?)\*{2}"""), "$1")
+            s = s.replace(Regex("""_{2}(.+?)_{2}"""), "$1")
+            // Italic (*text* or _text_)
+            s = s.replace(Regex("""\*(.+?)\*"""), "$1")
+            s = s.replace(Regex("""\b_(.+?)_\b"""), "$1")
+            // Headers (# ## ### etc)
+            s = s.replace(Regex("""^#{1,6}\s+""", RegexOption.MULTILINE), "")
+            // Links [text](url) → text
+            s = s.replace(Regex("""\[([^\]]+)\]\([^)]+\)"""), "$1")
+            // Images ![alt](url) → remove
+            s = s.replace(Regex("""!\[[^\]]*\]\([^)]+\)"""), "")
+            // Bullet points (- or * at start of line)
+            s = s.replace(Regex("""^[\-*+]\s+""", RegexOption.MULTILINE), "")
+            // Numbered lists (1. 2. etc)
+            s = s.replace(Regex("""^\d+\.\s+""", RegexOption.MULTILINE), "")
+            // Horizontal rules (--- or ***)
+            s = s.replace(Regex("""^[\-*_]{3,}$""", RegexOption.MULTILINE), "")
+            // Blockquotes (> )
+            s = s.replace(Regex("""^>\s?""", RegexOption.MULTILINE), "")
+            // Strikethrough (~~text~~)
+            s = s.replace(Regex("""~~(.+?)~~"""), "$1")
+            // Clean up extra whitespace
+            s = s.replace(Regex("""\n{3,}"""), "\n\n")
+            s = s.trim()
+            return s
+        }
+
         // ── Text Chunking (companion) ────────────────────────────────────────
         /**
          * Split text into sentence-sized chunks for streaming TTS.
@@ -240,6 +282,8 @@ class TextToSpeech(private val settings: AppSettings) {
      */
     suspend fun speak(text: String): Result<Unit> = withContext(Dispatchers.IO) {
         if (text.isBlank()) return@withContext Result.success(Unit)
+        val cleanText = stripMarkdown(text)
+        if (cleanText.isBlank()) return@withContext Result.success(Unit)
         if (settings.googleCloudApiKey.isBlank()) {
             return@withContext Result.failure(Exception("Google Cloud API key not configured"))
         }
@@ -247,7 +291,7 @@ class TextToSpeech(private val settings: AppSettings) {
         stopRequested = false
         isPlaying = true          // mark as playing BEFORE synthesis so stop() works immediately
         streamingMode = false
-        _currentText.value = text
+        _currentText.value = cleanText
         _state.value = TTSState.Synthesizing
         Log.d(TAG, "Synthesizing: ${text.take(80)}...")
 
@@ -400,16 +444,18 @@ class TextToSpeech(private val settings: AppSettings) {
      */
     suspend fun speakStreaming(text: String): Result<Unit> = withContext(Dispatchers.IO) {
         if (text.isBlank()) return@withContext Result.success(Unit)
+        val cleanText = stripMarkdown(text)
+        if (cleanText.isBlank()) return@withContext Result.success(Unit)
         if (settings.googleCloudApiKey.isBlank()) {
             return@withContext Result.failure(Exception("Google Cloud API key not configured"))
         }
 
-        val chunks = chunkText(text)
-        Log.d(TAG, "Streaming TTS: ${chunks.size} chunks for ${text.length} chars")
+        val chunks = chunkText(cleanText)
+        Log.d(TAG, "Streaming TTS: ${chunks.size} chunks for ${cleanText.length} chars")
 
         // Single chunk — delegate to regular speak() (no pipeline benefit)
         if (chunks.size <= 1) {
-            return@withContext speak(text)
+            return@withContext speak(cleanText)
         }
 
         stopRequested = false

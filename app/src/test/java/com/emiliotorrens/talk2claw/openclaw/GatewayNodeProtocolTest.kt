@@ -25,7 +25,7 @@ class GatewayNodeProtocolTest {
     @Test
     fun `buildConnectParams has role node`() {
         val params = GatewayNode.buildConnectParams(testToken)
-        assertEquals("role must be 'node'", "node", params.getString("role"))
+        assertEquals("role must be 'operator'", "operator", params.getString("role"))
     }
 
     @Test
@@ -258,7 +258,7 @@ class GatewayNodeProtocolTest {
         val reparsedAuth = reparsedParams.getJSONObject("auth")
         assertEquals(testToken, reparsedAuth.getString("token"))
         assertEquals(3, reparsedParams.getInt("minProtocol"))
-        assertEquals("node", reparsedParams.getString("role"))
+        assertEquals("operator", reparsedParams.getString("role"))
     }
 
     // ── Constants sanity check ────────────────────────────────────────────────
