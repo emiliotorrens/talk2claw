@@ -6,7 +6,7 @@ Voice assistant app for Android — talk directly to your OpenClaw agent using n
 
 - 🎤 **Voice-first**: press-to-talk or continuous conversation mode
 - 🔊 **High-quality TTS**: Google Cloud Neural2/Studio/Wavenet voices with streaming playback
-- ⚡ **Low latency**: sentence chunking + parallel synthesis pipeline (~300ms to first audio)
+- ⚡ **Low latency**: gRPC streaming synthesis with persistent HTTP/2 channel (~100ms to first audio, was ~300ms with REST)
 - 🗣️ **Voice interruption**: speak while Claw is talking to interrupt (auto/always/never modes)
 - 🔌 **WebSocket**: native OpenClaw gateway protocol with auto-reconnect
 - 🔐 **Device identity**: Ed25519 keypair + challenge-response authentication
@@ -24,7 +24,7 @@ Voice assistant app for Android — talk directly to your OpenClaw agent using n
     ↓
 Text → OpenClaw Gateway (WebSocket, chat.send) → Agent responds
     ↓
-Response text → Google Cloud TTS (chunked) → AudioTrack streaming → 🔊 Speaker
+Response text → Google Cloud TTS gRPC streaming (HTTP/2) → AudioTrack streaming → 🔊 Speaker
 ```
 
 **Transport**: WebSocket with OpenClaw Gateway Protocol v3
@@ -107,7 +107,7 @@ Speed adjustable from 0.8x to 1.3x in Settings.
 - **Networking**: OkHttp (WebSocket + HTTP)
 - **Crypto**: BouncyCastle (Ed25519 device identity)
 - **Audio**: Android AudioTrack (MODE_STREAM), SpeechRecognizer
-- **TTS**: Google Cloud Text-to-Speech REST API
+- **TTS**: Google Cloud Text-to-Speech — gRPC streaming (HTTP/2, persistent channel) with REST fallback
 - **Persistence**: Room DB (transcript history)
 - **Wake Word**: Picovoice Porcupine SDK
 - **Speaker Verification**: ONNX Runtime (framework ready)
@@ -132,7 +132,7 @@ Requirements: Android SDK (API 35), Java 17, Gradle 8.11.1
 
 ## Roadmap
 
-- **Phase 8**: gRPC Streaming TTS — migrate from REST to streaming synthesis (~100ms first audio vs ~300ms)
+- ~~**Phase 8**: gRPC Streaming TTS~~ ✅ — migrated from REST to gRPC streaming (HTTP/2, persistent channel, ~100ms first audio vs ~300ms)
 - **Phase 9**: Gemini Live / audio-native exploration — evaluate direct audio generation
 - Custom "Oye Claw" wake word (Picovoice Console)
 - Bundle ECAPA-TDNN model for real speaker verification

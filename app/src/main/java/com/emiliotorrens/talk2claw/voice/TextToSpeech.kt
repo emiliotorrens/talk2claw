@@ -28,6 +28,8 @@ import java.util.concurrent.TimeUnit
  * Phase 2: Supports interruption — stop() is fast and clean.
  * Phase 3: Streaming mode — chunks text into sentences and pipelines
  *          synthesis + playback so the first chunk plays in ~300ms.
+ * Phase 4: gRPC transport — uses persistent HTTP/2 connection with binary
+ *          protobuf encoding for lower latency (~100ms). Falls back to REST.
  *
  * Exposes currentText so the ViewModel can perform echo cancellation.
  */
@@ -171,6 +173,12 @@ class TextToSpeech(private val settings: AppSettings) {
         .connectTimeout(10, TimeUnit.SECONDS)
         .build()
 
+    /** gRPC client for TTS — persistent HTTP/2 connection, binary protobuf. */
+    private val grpcClient = GrpcTtsClient(settings)
+
+    /** Whether gRPC has failed and we should fall back to REST for remaining chunks. */
+    @Volatile private var grpcFailed = false
+
     private var audioTrack: AudioTrack? = null
 
     /** True while audio is actively playing. Set false to interrupt. */
@@ -215,14 +223,43 @@ class TextToSpeech(private val settings: AppSettings) {
     // ── Text Chunking (delegates to companion) ──────────────────────────────
     // Instance method kept for call-site compatibility; logic lives in companion.
 
-    // ── HTTP Synthesis ───────────────────────────────────────────────────────
+    // ── Synthesis (gRPC with REST fallback) ───────────────────────────────
+
+    /**
+     * Synthesize a single text chunk, preferring gRPC over REST.
+     * gRPC benefits: persistent HTTP/2 connection, binary protobuf, no base64.
+     * Falls back to REST if gRPC fails (and stays on REST for the session).
+     * Returns decoded PCM bytes (WAV header stripped) or null on failure.
+     * Blocking — must run on a background thread.
+     */
+    private fun synthesizeChunkWithFallback(chunk: String): ByteArray? {
+        if (chunk.isBlank()) return null
+
+        // Try gRPC first (unless it previously failed)
+        if (!grpcFailed) {
+            try {
+                val pcm = grpcClient.synthesize(chunk)
+                if (pcm != null) return pcm
+                Log.w(TAG, "gRPC returned null, falling back to REST")
+            } catch (e: Exception) {
+                Log.w(TAG, "gRPC failed: ${e.message}, falling back to REST")
+            }
+            grpcFailed = true
+        }
+
+        // REST fallback
+        return synthesizeChunkRest(chunk)
+    }
+
+    // ── REST Synthesis (fallback) ─────────────────────────────────────────
 
     /**
      * Synthesize a single text chunk via Google Cloud TTS.
+     * REST fallback for synthesis.
      * Returns decoded PCM bytes (WAV header stripped) or null on failure.
      * This is a blocking network call — must run on a background thread.
      */
-    private fun synthesizeChunk(chunk: String): ByteArray? {
+    private fun synthesizeChunkRest(chunk: String): ByteArray? {
         if (chunk.isBlank()) return null
         try {
             val body = JSONObject().apply {
@@ -299,63 +336,20 @@ class TextToSpeech(private val settings: AppSettings) {
         Log.d(TAG, "Synthesizing: ${text.take(80)}...")
 
         try {
-            // Build TTS request
-            val body = JSONObject().apply {
-                put("input", JSONObject().put("text", text))
-                put("voice", JSONObject().apply {
-                    put("languageCode", settings.ttsLanguageCode)
-                    put("name", settings.ttsVoice)
-                })
-                put("audioConfig", JSONObject().apply {
-                    put("audioEncoding", "LINEAR16")
-                    put("sampleRateHertz", SAMPLE_RATE)
-                    put("speakingRate", settings.speakingRate.toDouble())
-                })
-            }
+            val pcmData = synthesizeChunkWithFallback(cleanText)
 
-            val request = Request.Builder()
-                .url("$TTS_URL?key=${settings.googleCloudApiKey}")
-                .post(body.toString().toRequestBody("application/json".toMediaType()))
-                .build()
-
-            val response = client.newCall(request).execute()
-            val responseBody = response.body?.string() ?: ""
-            val code = response.code
-            response.close()
-
-            // Check if interrupted during synthesis (network call)
+            // Check if interrupted during synthesis
             if (stopRequested || !isPlaying) {
                 _currentText.value = ""
                 _state.value = TTSState.Idle
                 return@withContext Result.success(Unit)
             }
 
-            if (code !in 200..299) {
-                Log.w(TAG, "TTS error: HTTP $code")
+            if (pcmData == null) {
                 _currentText.value = ""
                 _state.value = TTSState.Idle
                 isPlaying = false
-                return@withContext Result.failure(Exception("TTS HTTP $code: ${responseBody.take(200)}"))
-            }
-
-            val json = JSONObject(responseBody)
-            val audioBase64 = json.optString("audioContent", "")
-            if (audioBase64.isEmpty()) {
-                _currentText.value = ""
-                _state.value = TTSState.Idle
-                isPlaying = false
-                return@withContext Result.failure(Exception("No audio in response"))
-            }
-
-            // Decode and play
-            val audioBytes = Base64.decode(audioBase64, Base64.DEFAULT)
-            // Skip WAV header (44 bytes) if present
-            val pcmData = if (audioBytes.size > 44 &&
-                audioBytes[0] == 'R'.code.toByte() &&
-                audioBytes[1] == 'I'.code.toByte()) {
-                audioBytes.copyOfRange(44, audioBytes.size)
-            } else {
-                audioBytes
+                return@withContext Result.failure(Exception("TTS synthesis failed"))
             }
 
             _state.value = TTSState.Playing
@@ -467,6 +461,7 @@ class TextToSpeech(private val settings: AppSettings) {
         streamingChunksTotal = chunks.size
         streamingChunksPlayed = 0
         totalDurationMs = 0L
+        grpcFailed = false  // Reset gRPC state for new session
         _currentText.value = text
         _state.value = TTSState.Synthesizing
 
@@ -508,7 +503,7 @@ class TextToSpeech(private val settings: AppSettings) {
                 for ((idx, chunk) in chunks.withIndex()) {
                     if (stopRequested) break
                     Log.d(TAG, "Synthesizing chunk ${idx + 1}/${chunks.size}: ${chunk.take(60)}")
-                    val pcm = synthesizeChunk(chunk)
+                    val pcm = synthesizeChunkWithFallback(chunk)
                     if (pcm == null || stopRequested) break
                     pcmChannel.send(pcm)  // suspends if consumer is behind (backpressure)
                 }
@@ -619,6 +614,15 @@ class TextToSpeech(private val settings: AppSettings) {
         try { track?.release() } catch (_: Exception) {}
 
         Log.d(TAG, "TTS stopped")
+    }
+
+    /**
+     * Shut down the gRPC channel. Call when the app is being destroyed.
+     */
+    fun shutdown() {
+        stop()
+        grpcClient.shutdown()
+        Log.d(TAG, "TTS shutdown complete")
     }
 
     sealed class TTSState {

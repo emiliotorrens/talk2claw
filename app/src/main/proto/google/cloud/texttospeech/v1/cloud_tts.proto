@@ -1,0 +1,48 @@
+// Minimal Google Cloud TTS v1 proto for gRPC stub generation (protobuf-lite).
+// Only includes SynthesizeSpeech RPC — sufficient for unary gRPC calls.
+syntax = "proto3";
+
+package google.cloud.texttospeech.v1;
+
+option java_package = "com.google.cloud.texttospeech.v1";
+option java_multiple_files = true;
+
+service TextToSpeech {
+  rpc SynthesizeSpeech(SynthesizeSpeechRequest) returns (SynthesizeSpeechResponse);
+}
+
+message SynthesizeSpeechRequest {
+  SynthesisInput input = 1;
+  VoiceSelectionParams voice = 2;
+  AudioConfig audio_config = 3;
+}
+
+message SynthesisInput {
+  oneof input_source {
+    string text = 1;
+    string ssml = 2;
+  }
+}
+
+message VoiceSelectionParams {
+  string language_code = 1;
+  string name = 2;
+}
+
+message AudioConfig {
+  AudioEncoding audio_encoding = 1;
+  double speaking_rate = 2;
+  double pitch = 3;
+  int32 sample_rate_hertz = 5;
+}
+
+enum AudioEncoding {
+  AUDIO_ENCODING_UNSPECIFIED = 0;
+  LINEAR16 = 1;
+  MP3 = 2;
+  OGG_OPUS = 3;
+}
+
+message SynthesizeSpeechResponse {
+  bytes audio_content = 1;
+}
