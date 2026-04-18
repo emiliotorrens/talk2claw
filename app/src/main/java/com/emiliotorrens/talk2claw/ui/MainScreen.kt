@@ -35,6 +35,8 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.emiliotorrens.talk2claw.openclaw.GatewayNode
+import com.emiliotorrens.talk2claw.settings.AppSettings
+import com.emiliotorrens.talk2claw.voice.findPresetByVoiceName
 import com.emiliotorrens.talk2claw.ui.MainViewModel.*
 import kotlinx.coroutines.launch
 
@@ -61,6 +63,7 @@ fun MainScreen(
     val connectionState  by viewModel.connectionState.collectAsState()
     val statusMessage    by viewModel.statusMessage.collectAsState()
     val singleShotMode   by viewModel.singleShotMode.collectAsState()
+    val appSettings      by viewModel.settings.collectAsState()
     val listState        = rememberLazyListState()
     val snackbarState    = remember { SnackbarHostState() }
     val scope            = rememberCoroutineScope()
@@ -122,6 +125,11 @@ fun MainScreen(
                 .padding(horizontal = 16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            // ── Config chips ───────────────────────────────────────────────
+            ConfigBar(appSettings = appSettings)
+
+            Spacer(modifier = Modifier.height(4.dp))
+
             // ── Transcript ─────────────────────────────────────────────────
             LazyColumn(
                 state = listState,
@@ -211,6 +219,34 @@ fun MainScreen(
 
             Spacer(modifier = Modifier.height(24.dp))
         }
+    }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Config bar — model + voice summary
+// ═════════════════════════════════════════════════════════════════════════════
+
+@Composable
+fun ConfigBar(appSettings: AppSettings) {
+    val modelLabel = appSettings.modelAlias.replaceFirstChar { it.uppercase() }
+    val voicePreset = findPresetByVoiceName(appSettings.ttsVoice)
+    val voiceLabel = voicePreset.name
+    val speedLabel = if (appSettings.speakingRate != 1.0f)
+        " · ${appSettings.speakingRate}x" else ""
+    val thinkingLabel = if (appSettings.thinkingEnabled) " · 🧠" else ""
+
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Text(
+            text = "$modelLabel · $voiceLabel$speedLabel$thinkingLabel",
+            fontSize = 12.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+            maxLines = 1
+        )
     }
 }
 
