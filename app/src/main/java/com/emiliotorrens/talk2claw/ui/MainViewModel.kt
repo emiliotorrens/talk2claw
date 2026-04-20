@@ -16,6 +16,7 @@ import com.emiliotorrens.talk2claw.voice.SpeakerVerification
 import com.emiliotorrens.talk2claw.voice.SpeechToText
 import com.emiliotorrens.talk2claw.voice.TextToSpeech
 import com.emiliotorrens.talk2claw.voice.VoicePreset
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -456,23 +457,45 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
 
-        // ── Speaker verification (if enabled) ──
+        // ── Speaker verification (if enabled) — runs IN PARALLEL with gateway call ──
         val s = _settings.value
         if (s.voiceMatchEnabled && s.enrolledEmbedding.isNotBlank()) {
             viewModelScope.launch {
-                val verified = speakerVerification.verify(
-                    enrolledEmbeddingJson = s.enrolledEmbedding,
-                    threshold = s.voiceMatchThreshold,
-                )
+                // Start verification and gateway request simultaneously
+                wasInterrupted = false
+                Log.d(TAG, "User said (pending verify): $text")
+                addTranscript(TranscriptEntry.User(text))
+                _pipelineState.value = PipelineState.Thinking
+
+                val verifyJob = async {
+                    speakerVerification.verify(
+                        enrolledEmbeddingJson = s.enrolledEmbedding,
+                        threshold = s.voiceMatchThreshold,
+                    )
+                }
+                val gatewayJob = async {
+                    sendMessageToGateway(text)
+                }
+
+                // Wait for verification first (2s) — if it fails, cancel gateway call
+                val verified = verifyJob.await()
                 if (!verified) {
-                    Log.d(TAG, "Speaker verification failed — ignoring STT result")
+                    gatewayJob.cancel()
+                    Log.d(TAG, "Speaker verification failed — discarding response")
                     _statusMessage.value = "Voz no reconocida"
+                    // Remove the user transcript entry we added
+                    _transcript.value = _transcript.value.dropLast(1)
+                    _pipelineState.value = PipelineState.Listening
                     if (_conversationActive.value) {
                         stt.resumeListening()
                     }
                     return@launch
                 }
-                processNormalSpeech(text)
+
+                // Verified — now wait for gateway and speak
+                Log.d(TAG, "Speaker verified ✓ — waiting for gateway response")
+                val result = gatewayJob.await()
+                handleGatewayResponse(result)
             }
             return
         }
@@ -502,7 +525,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
 
         val result = sendMessageToGateway(messageToSend)
+        handleGatewayResponse(result)
+    }
 
+    /**
+     * Handle a gateway response: speak it via TTS and resume listening.
+     * Shared by both normal pipeline and parallel-verify pipeline.
+     */
+    private suspend fun handleGatewayResponse(result: Result<String>) {
         result.fold(
             onSuccess = { response ->
                 if (!_conversationActive.value) return@fold
