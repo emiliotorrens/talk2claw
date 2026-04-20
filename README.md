@@ -14,7 +14,7 @@ Voice assistant app for Android — talk directly to your OpenClaw agent using n
 - 🗂️ **Persistent history**: conversation transcript saved locally (Room DB)
 - 📱 **Widget & Quick Tile**: 1x1 home screen widget + Quick Settings tile for instant access
 - 👋 **Wake word** (beta): "Oye Claw" hands-free activation via Picovoice Porcupine
-- 🔒 **Voice Match** (framework): on-device speaker verification — only responds to your voice
+- 🔒 **Voice Match**: on-device speaker verification via FFT spectral fingerprinting — only responds to your enrolled voice
 - 🎧 **Smart echo cancellation**: earpiece routing, volume reduction, fuzzy echo detection
 
 ## Architecture
@@ -79,13 +79,16 @@ Response text → Google Cloud TTS gRPC streaming (HTTP/2) → AudioTrack stream
 4. Works in background via foreground service
 5. ⚠️ Disable battery optimization for Talk2Claw in Android settings
 
-### Voice Match (Framework)
+### Voice Match
 
-Speaker verification framework is implemented but requires an ONNX embedding model (~20MB) to be bundled. When available:
+On-device speaker verification using FFT spectral fingerprinting. No external model or internet needed — lightweight and private.
+
 1. Settings → Voice Match → enable
-2. Tap "Registrar voz" and speak 3 phrases
-3. Adjust similarity threshold (default 0.7)
-4. Claw will only respond to your enrolled voice
+2. Tap "Registrar voz" and speak the 3 guided phrases
+3. Adjust similarity threshold (default 0.7, recommended 0.55–0.65 for real-world use)
+4. Claw will only respond to your enrolled voice — bystander speech is ignored
+
+**How it works**: Pre-emphasis → Hamming-windowed FFT → 16 log spectral bands + RMS + ZCR → mean+std over frames → 36-dimensional voice fingerprint. Verified via cosine similarity against enrolled profile.
 
 ## Voice Options
 
@@ -110,7 +113,7 @@ Speed adjustable from 0.8x to 1.3x in Settings.
 - **TTS**: Google Cloud Text-to-Speech — gRPC streaming (HTTP/2, persistent channel) with REST fallback
 - **Persistence**: Room DB (transcript history)
 - **Wake Word**: Picovoice Porcupine SDK
-- **Speaker Verification**: ONNX Runtime (framework ready)
+- **Speaker Verification**: On-device FFT spectral fingerprinting (no external model needed)
 
 ## Building
 
@@ -135,7 +138,7 @@ Requirements: Android SDK (API 35), Java 17, Gradle 8.11.1
 - ~~**Phase 8**: gRPC Streaming TTS~~ ✅ — migrated from REST to gRPC streaming (HTTP/2, persistent channel, ~100ms first audio vs ~300ms)
 - **Phase 9**: Gemini Live / audio-native exploration — evaluate direct audio generation
 - Custom "Oye Claw" wake word (Picovoice Console)
-- Bundle ECAPA-TDNN model for real speaker verification
+- Evaluate ECAPA-TDNN ONNX model for higher-accuracy speaker verification
 
 ## Inspiration
 

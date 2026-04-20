@@ -74,6 +74,12 @@ class MainActivity : ComponentActivity() {
                             onPreviewVoice = { viewModel.previewVoice(it) },
                             onModelChanged = { viewModel.sendModelCommand(it) },
                             onThinkingChanged = { viewModel.sendThinkingCommand(it) },
+                            onEnrollSpeaker = { onPhrase, onRecord ->
+                                viewModel.enrollSpeaker(onPhrase, onRecord)
+                            },
+                            onClearEnrollment = {
+                                viewModel.updateSettings(settings.copy(enrolledEmbedding = ""))
+                            },
                         )
                     } else {
                         MainScreen(

@@ -21,6 +21,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.emiliotorrens.talk2claw.openclaw.GatewayNode
 import com.emiliotorrens.talk2claw.settings.AppSettings
+import com.emiliotorrens.talk2claw.voice.SpeakerVerification
 import com.emiliotorrens.talk2claw.voice.VOICE_PRESETS
 import com.emiliotorrens.talk2claw.voice.VoicePreset
 import com.emiliotorrens.talk2claw.voice.findPresetByVoiceName
@@ -37,6 +38,8 @@ fun SettingsScreen(
     onPreviewVoice: (VoicePreset) -> Unit = {},
     onModelChanged: ((String) -> Unit)? = null,
     onThinkingChanged: ((Boolean) -> Unit)? = null,
+    onEnrollSpeaker: (suspend (onPhrase: suspend (Int, Int, String) -> Unit, onRecord: suspend (Int, Int) -> Unit) -> String?)? = null,
+    onClearEnrollment: (() -> Unit)? = null,
 ) {
     var host by remember { mutableStateOf(settings.gatewayHost) }
     var port by remember { mutableStateOf(settings.gatewayPort.toString()) }
@@ -60,6 +63,15 @@ fun SettingsScreen(
     // Voice match
     var voiceMatchEnabled by remember { mutableStateOf(settings.voiceMatchEnabled) }
     var voiceMatchThreshold by remember { mutableStateOf(settings.voiceMatchThreshold) }
+    var enrolledEmbedding by remember { mutableStateOf(settings.enrolledEmbedding) }
+
+    // Enrollment UI state
+    var enrollmentInProgress by remember { mutableStateOf(false) }
+    var enrollmentPhrase by remember { mutableStateOf(0) }      // 1-based, 0 = idle
+    var enrollmentTotal by remember { mutableStateOf(3) }
+    var enrollmentCurrentText by remember { mutableStateOf("") }
+    var enrollmentRecording by remember { mutableStateOf(false) }  // true = recording, false = preparing
+    var enrollmentError by remember { mutableStateOf<String?>(null) }
 
     // Interruption mode
     var interruptionMode by remember { mutableStateOf(settings.interruptionMode) }
@@ -81,6 +93,7 @@ fun SettingsScreen(
         picovoiceAccessKey = picovoiceAccessKey.trim(),
         voiceMatchEnabled = voiceMatchEnabled,
         voiceMatchThreshold = voiceMatchThreshold,
+        enrolledEmbedding = enrolledEmbedding,
         interruptionMode = interruptionMode,
     )
 
@@ -261,7 +274,7 @@ fun SettingsScreen(
                 Column(modifier = Modifier.weight(1f)) {
                     Text("Verificación de hablante", style = MaterialTheme.typography.bodyMedium)
                     Text(
-                        "Solo responde a tu voz. Requiere modelo ONNX (no incluido aún).",
+                        "Solo responde a tu voz. Usa huella espectral de audio — sin modelo externo.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                     )
@@ -289,33 +302,194 @@ fun SettingsScreen(
                     Slider(
                         value = voiceMatchThreshold,
                         onValueChange = { voiceMatchThreshold = it },
-                        valueRange = 0.5f..0.95f,
-                        steps = 8,
+                        valueRange = 0.5f..0.90f,
+                        steps = 7,
                         modifier = Modifier.fillMaxWidth(),
                     )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Text(
+                            "0.50 (permisivo)",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                        )
+                        Text(
+                            "0.90 (estricto)",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                        )
+                    }
                 }
 
-                // Enrollment button
-                val enrollmentStatus = if (settings.enrolledEmbedding.isNotBlank())
-                    "✅ Voz registrada" else "❌ Sin registrar"
-
-                Row(
+                // ── Enrollment card ──────────────────────────────
+                Card(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    ),
                 ) {
-                    Text(enrollmentStatus, style = MaterialTheme.typography.bodyMedium)
-                    Button(
-                        onClick = {
-                            scope.launch {
-                                snackbarHostState.showSnackbar(
-                                    "Modelo ONNX no disponible aún — enrollment desactivado",
-                                    duration = SnackbarDuration.Short,
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        // Status row
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Text(
+                                text = if (enrolledEmbedding.isNotBlank()) "✅" else "❌",
+                                style = MaterialTheme.typography.titleMedium,
+                            )
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = if (enrolledEmbedding.isNotBlank())
+                                        "Voz registrada" else "Sin registrar",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                )
+                                if (enrollmentError != null) {
+                                    Text(
+                                        text = enrollmentError!!,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.error,
+                                    )
+                                }
+                            }
+                        }
+
+                        // Enrollment progress (shown while enrolling)
+                        if (enrollmentInProgress) {
+                            val progressFraction = if (enrollmentTotal > 0)
+                                (enrollmentPhrase - 1).toFloat() / enrollmentTotal else 0f
+
+                            LinearProgressIndicator(
+                                progress = { progressFraction },
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+
+                            if (enrollmentPhrase > 0) {
+                                Text(
+                                    text = if (enrollmentRecording)
+                                        "🎙️ Grabando frase $enrollmentPhrase de $enrollmentTotal..."
+                                    else
+                                        "📋 Frase $enrollmentPhrase de $enrollmentTotal — prepárate:",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = if (enrollmentRecording)
+                                        MaterialTheme.colorScheme.error
+                                    else
+                                        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                                )
+                                if (enrollmentCurrentText.isNotBlank()) {
+                                    Text(
+                                        text = "\"$enrollmentCurrentText\"",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.primary,
+                                    )
+                                }
+                            } else {
+                                Text(
+                                    "Iniciando registro de voz...",
+                                    style = MaterialTheme.typography.bodySmall,
                                 )
                             }
                         }
-                    ) {
-                        Text("Registrar voz")
+
+                        // Action buttons
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            // Enroll button
+                            Button(
+                                onClick = {
+                                    if (onEnrollSpeaker == null) {
+                                        scope.launch {
+                                            snackbarHostState.showSnackbar(
+                                                "Enrollment no disponible",
+                                                duration = SnackbarDuration.Short,
+                                            )
+                                        }
+                                        return@Button
+                                    }
+                                    enrollmentInProgress = true
+                                    enrollmentPhrase = 0
+                                    enrollmentError = null
+                                    scope.launch {
+                                        val result = onEnrollSpeaker(
+                                            { current, total, phrase ->
+                                                enrollmentPhrase = current
+                                                enrollmentTotal = total
+                                                enrollmentCurrentText = phrase
+                                                enrollmentRecording = false
+                                            },
+                                            { current, total ->
+                                                enrollmentPhrase = current
+                                                enrollmentTotal = total
+                                                enrollmentRecording = true
+                                            },
+                                        )
+                                        enrollmentInProgress = false
+                                        enrollmentPhrase = 0
+                                        enrollmentCurrentText = ""
+                                        enrollmentRecording = false
+                                        if (result != null) {
+                                            enrolledEmbedding = result
+                                            enrollmentError = null
+                                            onSave(buildSettings())
+                                            snackbarHostState.showSnackbar(
+                                                "✅ Voz registrada correctamente",
+                                                duration = SnackbarDuration.Short,
+                                            )
+                                        } else {
+                                            enrollmentError =
+                                                "Error al registrar — habla más alto e intenta de nuevo"
+                                        }
+                                    }
+                                },
+                                enabled = !enrollmentInProgress,
+                                modifier = Modifier.weight(1f),
+                            ) {
+                                Text(
+                                    if (enrolledEmbedding.isNotBlank())
+                                        "Volver a registrar" else "Registrar voz",
+                                )
+                            }
+
+                            // Clear button (only shown if enrolled)
+                            if (enrolledEmbedding.isNotBlank() && !enrollmentInProgress) {
+                                OutlinedButton(
+                                    onClick = {
+                                        enrolledEmbedding = ""
+                                        enrollmentError = null
+                                        onClearEnrollment?.invoke()
+                                        onSave(buildSettings())
+                                        scope.launch {
+                                            snackbarHostState.showSnackbar(
+                                                "Registro de voz eliminado",
+                                                duration = SnackbarDuration.Short,
+                                            )
+                                        }
+                                    },
+                                ) {
+                                    Text("Borrar")
+                                }
+                            }
+                        }
+
+                        // Guidance text
+                        if (!enrollmentInProgress) {
+                            Text(
+                                text = "Registra ${SpeakerVerification.ENROLLMENT_PHRASES.size} frases en voz alta. " +
+                                    "Tendrás ${SpeakerVerification.PHRASE_PREP_DELAY_MS / 1000}s para prepararte antes de cada grabación.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+                            )
+                        }
                     }
                 }
             }

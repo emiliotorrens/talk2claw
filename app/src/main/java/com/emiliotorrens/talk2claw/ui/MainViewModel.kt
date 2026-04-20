@@ -309,8 +309,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         getApplication<Talk2ClawApp>().applyNewSettings(newSettings)
     }
 
-    /** Send /model <alias> silently if connected. Shows a snackbar on success. */
+    /**
+     * Send /model <alias> silently if connected AND persist the setting immediately.
+     * This ensures that reconnects via [applyModelAndReasoning] use the new model.
+     */
     fun sendModelCommand(alias: String) {
+        // Persist immediately so reconnects don't revert
+        val updated = _settings.value.copy(modelAlias = alias)
+        SettingsManager.save(updated)
+        _settings.value = updated
+
         viewModelScope.launch {
             if (gatewayNode.isConnected) {
                 val ok = gatewayNode.sendSilentCommand("/model $alias")
@@ -327,8 +335,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** Send /reasoning on|off silently if connected. */
+    /**
+     * Send /reasoning on|off silently if connected AND persist the setting immediately.
+     */
     fun sendThinkingCommand(enabled: Boolean) {
+        // Persist immediately so reconnects don't revert
+        val updated = _settings.value.copy(thinkingEnabled = enabled)
+        SettingsManager.save(updated)
+        _settings.value = updated
+
         viewModelScope.launch {
             if (gatewayNode.isConnected) {
                 val cmd = if (enabled) "/reasoning on" else "/reasoning off"
@@ -595,9 +610,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     /**
      * Start speaker enrollment process. Returns the embedding JSON or null.
+     * @param onPhrase Called with (current, total, phraseText) — show phrase, give user 2s to prepare.
+     * @param onRecord Called with (current, total) — recording starts now.
      */
-    suspend fun enrollSpeaker(onProgress: suspend (Int, Int) -> Unit): String? {
-        return speakerVerification.enroll(onProgress)
+    suspend fun enrollSpeaker(
+        onPhrase: suspend (Int, Int, String) -> Unit = { _, _, _ -> },
+        onRecord: suspend (Int, Int) -> Unit = { _, _ -> },
+    ): String? {
+        return speakerVerification.enroll(onPhrase, onRecord)
     }
 
     // ── Types ───────────────────────────────────────────────────

@@ -142,7 +142,7 @@ class SettingsTest {
 
     @Test
     fun `findPresetByVoiceName returns correct preset for Studio female`() {
-        val preset = findPresetByVoiceName("es-ES-Studio-A")
+        val preset = findPresetByVoiceName("es-ES-Studio-C")
         assertEquals("studio-f", preset.id)
         assertEquals("Studio", preset.tier)
         assertEquals("Femenino", preset.gender)
