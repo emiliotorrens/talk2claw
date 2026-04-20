@@ -17,9 +17,12 @@ import com.emiliotorrens.talk2claw.voice.SpeechToText
 import com.emiliotorrens.talk2claw.voice.TextToSpeech
 import com.emiliotorrens.talk2claw.voice.VoicePreset
 import kotlinx.coroutines.async
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.launch
 
 
@@ -446,7 +449,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             _pipelineState.value = PipelineState.Thinking
 
             viewModelScope.launch {
-                sendAndSpeak(text, interruptionPrefix = true)
+                sendAndSpeakStreaming(text, interruptionPrefix = true)
             }
             return
         }
@@ -510,7 +513,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _pipelineState.value = PipelineState.Thinking
 
         viewModelScope.launch {
-            sendAndSpeak(text, interruptionPrefix = false)
+            sendAndSpeakStreaming(text, interruptionPrefix = false)
         }
     }
 
@@ -526,6 +529,153 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
         val result = sendMessageToGateway(messageToSend)
         handleGatewayResponse(result)
+    }
+
+    /**
+     * Returns the index of the last sentence-ending character (. ! ? \n) in [text]
+     * that is followed by whitespace or is at the end of the string.
+     * Returns -1 if no boundary found.
+     */
+    private fun findLastSentenceBoundary(text: String): Int {
+        var last = -1
+        for (i in text.indices) {
+            val c = text[i]
+            if (c == '.' || c == '!' || c == '?' || c == '\n') {
+                if (i == text.length - 1 || text[i + 1].isWhitespace()) {
+                    last = i
+                }
+            }
+        }
+        return last
+    }
+
+    /**
+     * Send [userText] to the gateway and start speaking the response as soon as the
+     * first sentence arrives — without waiting for the complete response.
+     *
+     * Pipeline:
+     *  1. [GatewayNode.sendChatMessageStreaming] returns a Flow of [GatewayNode.StreamEvent].
+     *  2. Delta events are buffered until a sentence boundary is detected, then the
+     *     completed sentence is pushed to [TextToSpeech.speakFlow] for immediate synthesis.
+     *  3. On Final, the remaining text buffer is flushed, the sentence channel is closed,
+     *     and the complete response is added to the transcript.
+     *  4. Falls back to the non-streaming path when the gateway is unreachable (HTTP bridge).
+     */
+    private suspend fun sendAndSpeakStreaming(userText: String, interruptionPrefix: Boolean) {
+        val messageToSend = if (interruptionPrefix) {
+            "[User interrupted previous response] $userText"
+        } else {
+            userText
+        }
+
+        // Fall back to non-streaming HTTP bridge when WebSocket is unavailable
+        if (!gatewayNode.isConnected) {
+            Log.d(TAG, "sendAndSpeakStreaming: WebSocket unavailable — falling back to HTTP bridge")
+            _statusMessage.value = "Usando HTTP fallback"
+            val result = bridge.sendMessage(messageToSend)
+            handleGatewayResponse(result)
+            return
+        }
+
+        // Channel that carries completed sentences from gateway collector → TTS synthesizer
+        val sentenceChannel = Channel<String>(capacity = Channel.BUFFERED)
+        var firstSentenceSent = false
+        var ttsError: Throwable? = null
+        var sentenceBuffer = StringBuilder()
+
+        // Launch TTS consumer — reads sentences as they arrive and synthesizes them
+        val ttsJob = viewModelScope.launch {
+            val sentencesFlow: Flow<String> = flow {
+                for (sentence in sentenceChannel) emit(sentence)
+            }
+            tts.speakFlow(sentencesFlow).fold(
+                onSuccess = { /* state handled below after join */ },
+                onFailure = { err -> ttsError = err }
+            )
+        }
+
+        // Collect gateway streaming events and pipe completed sentences to TTS
+        try {
+            gatewayNode.sendChatMessageStreaming(messageToSend).collect { event ->
+                when (event) {
+                    is GatewayNode.StreamEvent.Delta -> {
+                        sentenceBuffer.append(event.text)
+                        val bufText = sentenceBuffer.toString()
+                        val boundary = findLastSentenceBoundary(bufText)
+                        if (boundary >= 0) {
+                            val sentence = bufText.substring(0, boundary + 1).trim()
+                            if (sentence.isNotBlank()) {
+                                // Transition to Speaking on first sentence
+                                if (!firstSentenceSent) {
+                                    firstSentenceSent = true
+                                    wasInterrupted = false
+                                    _pipelineState.value = PipelineState.Speaking
+                                    setEchoCancellationMode(true)
+                                    if (isInterruptionAllowed()) stt.resumeListening()
+                                    Log.d(TAG, "sendAndSpeakStreaming: first sentence ready — switching to Speaking")
+                                }
+                                sentenceChannel.send(sentence)
+                            }
+                            sentenceBuffer = StringBuilder(bufText.substring(boundary + 1))
+                        }
+                    }
+                    is GatewayNode.StreamEvent.Final -> {
+                        // Flush any remaining text in the buffer
+                        val remaining = sentenceBuffer.toString().trim()
+                        if (remaining.isNotBlank()) {
+                            if (!firstSentenceSent) {
+                                firstSentenceSent = true
+                                wasInterrupted = false
+                                _pipelineState.value = PipelineState.Speaking
+                                setEchoCancellationMode(true)
+                                if (isInterruptionAllowed()) stt.resumeListening()
+                            }
+                            sentenceChannel.send(remaining)
+                        }
+                        sentenceChannel.close()
+                        Log.d(TAG, "sendAndSpeakStreaming: Final — '${event.fullText.take(80)}'")
+                        addTranscript(TranscriptEntry.Claw(event.fullText))
+                    }
+                    is GatewayNode.StreamEvent.Error -> {
+                        sentenceChannel.close(event.error)
+                        Log.e(TAG, "sendAndSpeakStreaming: stream error — ${event.error.message}")
+                        if (!firstSentenceSent) {
+                            addTranscript(TranscriptEntry.Error("Error: ${event.error.message}"))
+                            _statusMessage.value = "Error: ${event.error.message}"
+                            if (_conversationActive.value) {
+                                _pipelineState.value = PipelineState.Listening
+                                stt.resumeListening()
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "sendAndSpeakStreaming collect error: ${e.message}")
+            sentenceChannel.close(e)
+            if (!firstSentenceSent) {
+                addTranscript(TranscriptEntry.Error("Error: ${e.message}"))
+                _statusMessage.value = "Error: ${e.message}"
+                if (_conversationActive.value) {
+                    _pipelineState.value = PipelineState.Listening
+                    stt.resumeListening()
+                }
+            }
+        }
+
+        // Wait for TTS to finish draining all synthesized sentences
+        ttsJob.join()
+
+        // Restore state after TTS completes
+        setEchoCancellationMode(false)
+        if (ttsError != null && !wasInterrupted) {
+            Log.w(TAG, "sendAndSpeakStreaming TTS error: ${ttsError?.message}")
+            _statusMessage.value = "TTS: ${ttsError?.message}"
+        }
+        if (_conversationActive.value && !wasInterrupted) {
+            _pipelineState.value = PipelineState.Listening
+            stt.resumeListening()
+        }
     }
 
     /**

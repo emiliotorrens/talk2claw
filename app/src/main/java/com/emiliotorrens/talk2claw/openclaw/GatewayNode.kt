@@ -3,9 +3,12 @@ package com.emiliotorrens.talk2claw.openclaw
 import android.util.Log
 import com.emiliotorrens.talk2claw.settings.AppSettings
 import kotlinx.coroutines.*
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.flow
 import okhttp3.*
 import org.json.JSONArray
 import org.json.JSONObject
@@ -97,6 +100,20 @@ class GatewayNode(private var settings: AppSettings, private var deviceIdentity:
                 ?: json.optString("error", "RPC error")
     }
 
+    // ── Streaming event types ────────────────────────────────────
+
+    /**
+     * Events emitted by [sendChatMessageStreaming].
+     * Delta: incremental text chunk from the gateway.
+     * Final: complete response (stream is done).
+     * Error: something went wrong.
+     */
+    sealed class StreamEvent {
+        data class Delta(val text: String) : StreamEvent()
+        data class Final(val fullText: String) : StreamEvent()
+        data class Error(val error: Throwable) : StreamEvent()
+    }
+
     // ── Connection state ────────────────────────────────────────
 
     sealed class ConnectionState {
@@ -125,6 +142,8 @@ class GatewayNode(private var settings: AppSettings, private var deviceIdentity:
     private val pending = ConcurrentHashMap<String, CompletableDeferred<JSONObject>>()
     /** Pending chat responses keyed by runId — completed when final chat event arrives. */
     private val pendingChatRuns = ConcurrentHashMap<String, CompletableDeferred<String>>()
+    /** Streaming chat channels keyed by runId — fed incrementally as events arrive. */
+    private val pendingChatStreams = ConcurrentHashMap<String, Channel<StreamEvent>>()
     private var reconnectJob: Job? = null
     private var reconnectDelayMs = RECONNECT_DELAY_BASE_MS
     private var isUserDisconnected = false
@@ -180,6 +199,65 @@ class GatewayNode(private var settings: AppSettings, private var deviceIdentity:
             webSocket = null
             isUserDisconnected = false
             connect()
+        }
+    }
+
+    /**
+     * Send a user message and stream the assistant's response via a [Flow].
+     * Emits [StreamEvent.Delta] for each incremental chunk, then [StreamEvent.Final]
+     * with the complete text.  Falls back to a single-shot Final if the gateway
+     * doesn't send streaming events for this run.
+     *
+     * The returned Flow is cold — collection triggers the RPC.  Only one collector
+     * is supported per call; cancel the Flow to abort.
+     */
+    suspend fun sendChatMessageStreaming(message: String): Flow<StreamEvent> {
+        if (!isConnected) {
+            return flow { emit(StreamEvent.Error(Exception("Not connected to gateway"))) }
+        }
+        return try {
+            val response = rpc("chat.send", JSONObject().apply {
+                put("message", message)
+                put("sessionKey", "main")
+                put("idempotencyKey", UUID.randomUUID().toString())
+            })
+            val payload = response.optJSONObject("payload") ?: response
+            val runId = payload.optString("runId", "")
+            if (runId.isEmpty()) {
+                val text = extractChatText(response)
+                if (text.isNotEmpty()) {
+                    return flow {
+                        emit(StreamEvent.Delta(text))
+                        emit(StreamEvent.Final(text))
+                    }
+                }
+                return flow { emit(StreamEvent.Error(Exception("No runId in chat.send response"))) }
+            }
+
+            Log.d(TAG, "chat.send ACK — streaming (runId=$runId)")
+            val channel = Channel<StreamEvent>(capacity = 64)
+            pendingChatStreams[runId] = channel
+
+            flow {
+                try {
+                    withTimeout(RPC_TIMEOUT_MS) {
+                        for (event in channel) {
+                            emit(event)
+                            // Terminal events — channel is already closed by producer
+                            if (event is StreamEvent.Final || event is StreamEvent.Error) break
+                        }
+                    }
+                } catch (e: TimeoutCancellationException) {
+                    Log.w(TAG, "Streaming chat timeout (runId=${runId.take(8)})")
+                    emit(StreamEvent.Error(Exception("Response timeout")))
+                } finally {
+                    pendingChatStreams.remove(runId)
+                    channel.close()
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "sendChatMessageStreaming error: ${e.message}")
+            flow { emit(StreamEvent.Error(e)) }
         }
     }
 
@@ -270,8 +348,15 @@ class GatewayNode(private var settings: AppSettings, private var deviceIdentity:
         }
     }
 
-    /** Cancel all pending RPC calls — e.g. when view is cleared. */
-    fun cancelPendingCalls() = cancelAllPending("Cancelled")
+    /** Cancel all pending RPC calls and streaming channels — e.g. when view is cleared. */
+    fun cancelPendingCalls() {
+        cancelAllPending("Cancelled")
+        pendingChatStreams.values.forEach { channel ->
+            channel.trySend(StreamEvent.Error(Exception("Cancelled")))
+            channel.close()
+        }
+        pendingChatStreams.clear()
+    }
 
     /** Call when the component is destroyed. */
     fun destroy() {
@@ -357,21 +442,41 @@ class GatewayNode(private var settings: AppSettings, private var deviceIdentity:
         }
     }
 
-    /** Handle streaming chat events — extract final assistant text and complete pending runs. */
+    /** Handle streaming chat events — emit deltas and finals to pending channels/deferreds. */
     private fun handleChatEvent(json: JSONObject) {
         val payload = json.optJSONObject("payload") ?: json
         val runId = payload.optString("runId", json.optString("runId", ""))
         val state = payload.optString("state", "")
         Log.d(TAG, "Chat event: runId=${runId.take(8)} state=$state")
-        if (state != "final" || runId.isEmpty()) return
 
-        val messageObj = payload.optJSONObject("message") ?: return
+        if (runId.isEmpty()) return
 
-        // Extract text from content array or direct string
-        val text = extractTextFromMessage(messageObj)
-        if (text.isNotEmpty()) {
-            Log.d(TAG, "Chat final (runId=${runId.take(8)}): ${text.take(100)}")
-            pendingChatRuns[runId]?.complete(text)
+        when (state) {
+            "streaming" -> {
+                // Extract delta text — try payload.delta.text, then payload.text
+                val deltaText = (payload.optJSONObject("delta")?.optString("text", "") ?: "")
+                    .ifEmpty { payload.optString("text", "") }
+                    .ifEmpty { payload.optString("delta", "") }
+                Log.v(TAG, "Chat delta (runId=${runId.take(8)}): '${deltaText.take(60)}'")
+                if (deltaText.isNotEmpty()) {
+                    pendingChatStreams[runId]?.trySend(StreamEvent.Delta(deltaText))
+                }
+            }
+            "final" -> {
+                val messageObj = payload.optJSONObject("message") ?: return
+                val text = extractTextFromMessage(messageObj)
+                if (text.isNotEmpty()) {
+                    Log.d(TAG, "Chat final (runId=${runId.take(8)}): ${text.take(100)}")
+                    // Complete old-style deferred (sendChatMessage path)
+                    pendingChatRuns[runId]?.complete(text)
+                    // Emit to streaming channel (sendChatMessageStreaming path)
+                    pendingChatStreams[runId]?.let { channel ->
+                        channel.trySend(StreamEvent.Final(text))
+                        channel.close()
+                    }
+                }
+            }
+            else -> Log.d(TAG, "Chat event state='$state' — ignoring")
         }
     }
 
@@ -481,6 +586,12 @@ class GatewayNode(private var settings: AppSettings, private var deviceIdentity:
         cancelAllPending(reason)
         pendingChatRuns.values.forEach { it.completeExceptionally(Exception(reason)) }
         pendingChatRuns.clear()
+        val streamError = StreamEvent.Error(Exception(reason))
+        pendingChatStreams.values.forEach { channel ->
+            channel.trySend(streamError)
+            channel.close()
+        }
+        pendingChatStreams.clear()
 
         if (isUserDisconnected) {
             _connectionState.value = ConnectionState.Disconnected

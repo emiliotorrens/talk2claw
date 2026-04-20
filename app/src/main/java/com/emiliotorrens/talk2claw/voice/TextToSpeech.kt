@@ -8,6 +8,7 @@ import android.util.Log
 import com.emiliotorrens.talk2claw.settings.AppSettings
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -587,6 +588,149 @@ class TextToSpeech(private val settings: AppSettings) {
         } else {
             Result.success(Unit)
         }
+    }
+
+    // ── speakFlow() — streaming TTS from a sentence Flow ──────────────────────────────────
+
+    /**
+     * Streaming TTS from a [Flow] of sentences.
+     *
+     * Synthesizes each sentence as it arrives from the flow and plays it immediately,
+     * while the next sentence is being synthesized in parallel.  Used by MainViewModel
+     * to start speaking the first sentence before the gateway has finished responding.
+     *
+     * The pipeline mirrors [speakStreaming] but accepts a live [Flow] of sentences
+     * instead of a pre-computed list.  Interruption via [stop] works the same way.
+     */
+    suspend fun speakFlow(sentences: Flow<String>): Result<Unit> = withContext(Dispatchers.IO) {
+        if (settings.googleCloudApiKey.isBlank()) {
+            return@withContext Result.failure(Exception("Google Cloud API key not configured"))
+        }
+
+        stopRequested = false
+        isPlaying = true
+        streamingMode = true
+        streamingChunksTotal = 0      // incremented as sentences arrive
+        streamingChunksPlayed = 0
+        totalDurationMs = 0L
+        grpcFailed = false
+        _currentText.value = ""
+        _state.value = TTSState.Synthesizing
+
+        // Bounded channel: synthesizer stays at most 2 chunks ahead of playback
+        val pcmChannel = Channel<ByteArray>(capacity = 2)
+        var synthError: Exception? = null
+        val accumulatedText = StringBuilder()
+
+        // ── Synthesizer coroutine ────────────────────────────────────────────
+        launch {
+            try {
+                sentences.collect { sentence ->
+                    if (stopRequested) return@collect
+                    val clean = stripMarkdown(sentence).trim()
+                    if (clean.isBlank()) return@collect
+
+                    streamingChunksTotal++
+                    accumulatedText.append(sentence).append(" ")
+                    _currentText.value = accumulatedText.toString()
+
+                    Log.d(TAG, "speakFlow: synthesizing '${clean.take(60)}'")
+                    val pcm = synthesizeChunkWithFallback(clean)
+                    if (pcm != null && !stopRequested) {
+                        pcmChannel.send(pcm)  // back-pressure: suspends if playback is behind
+                    }
+                }
+            } catch (e: CancellationException) {
+                // Normal — flow cancelled (e.g. stop() called)
+            } catch (e: Exception) {
+                Log.e(TAG, "speakFlow synthesis error: ${e.message}")
+                synthError = e
+            } finally {
+                pcmChannel.close()
+            }
+        }
+
+        // ── Streaming AudioTrack ─────────────────────────────────────────────
+        val minBuf = AudioTrack.getMinBufferSize(
+            SAMPLE_RATE, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT
+        )
+        val bufSize = maxOf(minBuf * 8, 131072)
+
+        val track = AudioTrack.Builder()
+            .setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_ASSISTANT)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                    .build()
+            )
+            .setAudioFormat(
+                AudioFormat.Builder()
+                    .setSampleRate(SAMPLE_RATE)
+                    .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                    .build()
+            )
+            .setTransferMode(AudioTrack.MODE_STREAM)
+            .setBufferSizeInBytes(bufSize)
+            .build()
+
+        audioTrack = track
+
+        // ── Playback loop ────────────────────────────────────────────────────
+        var trackStarted = false
+        var totalBytesWritten = 0L
+
+        try {
+            for (pcm in pcmChannel) {
+                if (stopRequested) {
+                    pcmChannel.cancel()
+                    break
+                }
+                if (!trackStarted) {
+                    track.play()
+                    trackStarted = true
+                    playbackStartTimeMs = System.currentTimeMillis()
+                    _state.value = TTSState.Playing
+                    Log.d(TAG, "speakFlow: playback started (first sentence synthesized)")
+                }
+                var offset = 0
+                while (offset < pcm.size && !stopRequested) {
+                    val written = track.write(pcm, offset, pcm.size - offset)
+                    if (written <= 0) break
+                    offset += written
+                }
+                totalBytesWritten += pcm.size
+                totalDurationMs = (totalBytesWritten * 1000L) / (SAMPLE_RATE * 2)
+                streamingChunksPlayed++
+            }
+        } catch (e: Exception) {
+            if (e !is CancellationException) Log.w(TAG, "speakFlow playback error: ${e.message}")
+        }
+
+        // Drain remaining audio from AudioTrack buffer (normal completion only)
+        if (trackStarted && !stopRequested && isPlaying) {
+            while (isPlaying && !stopRequested) {
+                val elapsed = System.currentTimeMillis() - playbackStartTimeMs
+                if (elapsed >= totalDurationMs + 300) break
+                Thread.sleep(POLL_INTERVAL_MS)
+            }
+        }
+
+        // Normal completion: release AudioTrack ourselves
+        if (isPlaying && !stopRequested) {
+            isPlaying = false
+            val t = audioTrack
+            audioTrack = null
+            try { t?.stop() } catch (_: Exception) {}
+            try { t?.release() } catch (_: Exception) {}
+        }
+
+        _currentText.value = ""
+        _state.value = TTSState.Idle
+        streamingMode = false
+
+        val err = synthError
+        if (err != null) Result.failure(err) else Result.success(Unit)
     }
 
     // ── stop() ───────────────────────────────────────────────────────────────
