@@ -26,7 +26,7 @@ class GatewayNode(private var settings: AppSettings, private var deviceIdentity:
 
     companion object {
         private const val TAG = "GatewayNode"
-        internal const val RPC_TIMEOUT_MS = 30_000L
+        internal const val RPC_TIMEOUT_MS = 90_000L
         internal const val HANDSHAKE_TIMEOUT_MS = 10_000L
         internal const val RECONNECT_DELAY_BASE_MS = 3_000L
         internal const val RECONNECT_DELAY_MAX_MS = 60_000L
